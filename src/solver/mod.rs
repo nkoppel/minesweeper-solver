@@ -1,57 +1,23 @@
-use crate::game::*;
-
-pub use std::collections::{HashSet, HashMap};
-
 mod solve;
 
-pub use crate::solver::solve::*;
+pub use std::collections::{HashSet, VecDeque};
 
-#[derive(Clone, Debug)]
-pub struct Field {
-    nmines: usize,
-    points: HashSet<Point>,
-}
+pub use solve::*;
+use crate::game::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Square {
     Empty,
     Mine,
     Num(usize),
-    Active(HashSet<usize>)
 }
 
 pub use Square::*;
 
-impl Field {
-    pub fn new(nmines: usize) -> Self {
-        Self {
-            nmines,
-            points: HashSet::new(),
-        }
-    }
-
-    pub fn solved_status(&self) -> Option<bool> {
-        if  self.nmines == 0 ||
-            self.points.is_empty() ||
-            self.nmines == self.points.len()
-        {
-            Some(true)
-        } else if self.nmines == 0 {
-            Some(false)
-        } else {
-            None
-        }
-    }
-}
-
-use std::borrow::Borrow;
-use std::mem;
-
 #[derive(Clone, Debug)]
 pub struct Solver {
     grid: Vec<Vec<Square>>,
-    fields: HashMap<usize, Field>,
-    field_id: usize,
+    active_squares: HashSet<Point>,
     game: Game
 }
 
@@ -61,8 +27,7 @@ impl Solver {
 
         Self {
             grid: vec![vec![Empty; w]; h],
-            fields: HashMap::new(),
-            field_id: 0,
+            active_squares: HashSet::new(),
             game,
         }
     }
@@ -80,9 +45,9 @@ impl Solver {
     }
 
     pub fn uncover_point(&mut self, point: Point) {
-        match self.game.get_square(point) {
+        match self.game.explore_square(point) {
             Some(n) => self.set_point(point, Num(n)),
-            None => panic!("Blew up")
+            None => println!("blew up at: {point:?}") //panic!("Blew up")
         }
     }
 }
@@ -97,7 +62,7 @@ impl fmt::Display for Solver {
                     Num(0) => write!(f, "``")?,
                     Num(n) => write!(f, "{} ", n)?,
                     Mine => write!(f, "* ")?,
-                    Empty | Active(_) => write!(f, "  ")?,
+                    Empty => write!(f, "  ")?,
                 }
             }
             writeln!(f)?;

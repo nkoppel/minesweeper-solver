@@ -1,198 +1,128 @@
 use crate::game::*;
 use crate::solver::*;
+use crate::csp::*;
+use crate::bitvec::*;
+
+use std::collections::HashMap;
 
 impl Solver {
-    fn new_field(&mut self, point: Point) -> usize {
-        self.field_id += 1;
-        let id = self.field_id;
-
-        for point2 in self.game.get_neighbors(point) {
-            let square = self.get_point_mut(point2);
-
-            if *square == Empty {
-                *square = Active(HashSet::with_capacity(8));
-            }
-
-            if let Active(set) = square {
-                set.insert(id);
-            }
-        }
-
-        id
-    }
-
-    fn solve_field(&mut self, f: usize) -> bool {
-        if let Some(field) = self.fields.get(&f) {
-            match field.solved_status() {
-                Some(true) => {
-                    let field = self.fields.remove(&f).unwrap();
-
-                    for point in field.points {
-                        self.set_point(point, Mine);
-                    }
-
-                    return true;
-                }
-                Some(false) => {
-                    let field = self.fields.remove(&f).unwrap();
-
-                    for point in field.points {
-                        self.set_point(point, Mine);
-                    }
-
-                    return true;
-                }
-                None => return false,
-            }
-        }
-        false
-    }
-
-    fn field_remove_point(&mut self, field: usize, point: Point) -> bool {
-        let is_mine = *self.get_point(point) == Mine;
-
-        if let Some(f) = self.fields.get_mut(&field) {
-            let out = f.points.remove(&point);
-
-            if is_mine {
-                f.nmines -= 1;
-            }
-
-            if f.points.is_empty() {
-                self.fields.remove(&field);
-            }
-
-            if let Active(set) = self.get_point_mut(point) {
-                set.remove(&field);
-            }
-
-            return out;
-        }
-        false
-    }
-
-    fn field_remove_field(&mut self, f1: usize, f2: usize) {
-        let field1 = self.fields.get(&f1).unwrap();
-        let field2 = self.fields.get(&f2).unwrap();
-
-        let intersect: HashSet<_> =
-            field1.points
-                .intersection(&field2.points)
-                .map(|x| *x)
-                .collect();
-
-        let points: HashSet<_> =
-            field1.points
-                .difference(&intersect)
-                .map(|x| *x)
-                .collect();
-
-        let mines2 = field2.nmines;
-
-        let field1 = self.fields.get_mut(&f1).unwrap();
-        field1.nmines -= mines2;
-        field1.points = points;
-
-        if field1.points.is_empty() {
-            self.fields.remove(&f1);
-        }
-
-        for point in intersect {
-            if let Active(set) = self.get_point_mut(point) {
-                set.remove(&f1);
-            }
-        }
-    }
-
-    fn field_get_collisions(&self, f: usize) -> HashSet<usize> {
-        let mut out = HashSet::new();
-
-        for p in &self.fields.get(&f).unwrap().points {
-            if let Active(set) = self.get_point(*p) {
-                for f2 in set {
-                    out.insert(*f2);
-                }
-            }
-        }
-
-        out.remove(&f);
-
-        out
-    }
-
     pub fn propogate(&mut self, point: Point) {
         let mut stack = self.game.get_neighbors(point);
 
         stack.push(point);
 
         while let Some(point) = stack.pop() {
-            if let Num(nmines) = self.get_point(point) {
-                let mut neighbors = self.game.get_neighbors(point);
-                let mut nmines_found = 0;
-                let mut nempty = 0;
+            let Num(nmines) = self.get_point(point) else {continue};
+
+            let neighbors = self.game.get_neighbors(point);
+            let mut nmines_found = 0;
+            let mut nempty = 0;
+
+            for point2 in &neighbors {
+                match self.get_point(*point2) {
+                    Mine => nmines_found += 1,
+                    Empty => nempty += 1,
+                    _ => ()
+                }
+            }
+
+            if nempty == 0 {
+                continue;
+            } else if nmines_found == *nmines {
+                let mut changed = false;
 
                 for point2 in &neighbors {
-                    match self.get_point(*point2) {
-                        Mine => nmines_found += 1,
-                        Empty | Active(_) => nempty += 1,
-                        _ => ()
+                    if *self.get_point(*point2) != Mine {
+                        self.uncover_point(*point2);
+                        changed = true;
                     }
                 }
 
-                if nempty == 0 {
-                    continue;
-                } else if nmines_found == *nmines {
-                    let mut changed = false;
+                if changed {
+                    stack.append(&mut self.game.get_neighbors(point));
+                }
+            } else if nempty == nmines - nmines_found {
+                let mut changed = false;
 
-                    for point2 in &neighbors {
-                        if *self.get_point(*point2) != Mine {
-                            self.uncover_point(*point2);
-                            changed = true;
-                        }
+                for point2 in &neighbors {
+                    if *self.get_point(*point2) == Empty {
+                        self.set_point(*point2, Mine);
+                        changed = true;
                     }
+                }
 
-                    if changed {
-                        stack.append(&mut self.game.get_neighbors(point));
-                    }
-                } else if nempty == nmines - nmines_found {
-                    let mut changed = false;
-
-                    for point2 in &neighbors {
-                        match self.get_point(*point2) {
-                            Empty | Active(_) => {
-                                self.set_point(*point2, Mine);
-                                changed = true;
-                            },
-                            _ => ()
-                        }
-                    }
-
-                    if changed {
-                        stack.append(&mut neighbors);
-                        stack.append(&mut self.game.get_double_neighbors(point));
-                    }
+                if changed {
+                    stack.append(&mut self.game.get_double_neighbors(point));
                 }
             }
         }
     }
 
-    fn propogate_fields(&mut self, f: usize) {
-        if self.solve_field(f) {
-            return;
-        }
+    pub fn extract_constraints(&self) -> (Vec<Point>, Vec<(BitVec, usize)>) {
+        let mut points1 = HashMap::new();
+        let mut points2 = Vec::new();
+        let mut rows = Vec::new();
 
-        let field1 = self.fields.get(&f).unwrap();
+        let (width, height) = self.game.size();
 
-        for f2 in self.field_get_collisions(f) {
-            let field2 = self.fields.get(&f2).unwrap();
+        for y in 0..height {
+            for x in 0..width {
+                let point = (x, y);
 
-            let len1 = field1.points.len();
-            let len2 = field2.points.len();
-            let ilen = field1.points.intersection(&field2.points).count();
+                let Num(mut nmines) = self.get_point(point) else {continue};
 
-            if ilen == len1 {
-                
+                let mut row = (BitVec::new(false, points2.len()), 0);
+                let mut has_empty = false;
+
+                for point2 in self.game.get_neighbors(point) {
+                    if *self.get_point(point2) != Empty {
+                        if *self.get_point(point2) == Mine {
+                            nmines -= 1;
+                        }
+                        continue;
+                    }
+                    has_empty = true;
+
+                    if let Some(id) = points1.get(&point2) {
+                        row.0.set(*id, true);
+                    } else {
+                        points1.insert(point2, points2.len());
+                        points2.push(point2);
+                        row.0.push(true);
+                    }
+                }
+
+                row.1 = nmines;
+
+                if has_empty {
+                    rows.push(row);
+                }
             }
         }
+
+        for row in &mut rows {
+            row.0.resize(points2.len(), false);
+        }
+
+        // println!("{points1:?}");
+
+        (points2, rows)
+    }
+
+    pub fn solve_csp(&mut self) {
+        let (points, rows) = self.extract_constraints();
+        let mut subsolutions = rows
+            .into_iter()
+            .map(|(mask, count)| SubSolutionSet::from_constraint(mask, count))
+            .collect::<Vec<_>>();
+
+        // println!("{subsolutions:?}");
+
+        merge_all_subsolutions(&mut subsolutions);
+
+        // println!("{points:?}");
+        // println!("{}", points.len());
+        // println!();
+        // println!("{subsolutions:?}");
     }
 }

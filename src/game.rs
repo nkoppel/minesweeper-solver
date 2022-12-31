@@ -9,6 +9,7 @@ pub type RelPoint = (isize, isize);
 pub struct Game {
     pub grid: Vec<Vec<bool>>,
     pub nmines: usize,
+    pub failed: bool,
     neighbors: Vec<RelPoint>,
     double_neighbors: Vec<RelPoint>,
 }
@@ -29,9 +30,11 @@ pub const KNIGHT_NEIGHBORHOOD: [RelPoint; 8] =
                (-1,  2),   ( 1,  2),
     ];
 
-fn valid_neighbors(neighbors: &Vec<RelPoint>, w: usize, h: usize, x: usize, y: usize)
+fn valid_neighbors(neighbors: &[RelPoint], size: Point, point: Point)
     -> Vec<Point>
 {
+    let (w, h) = size;
+    let (x, y) = point;
     let mut out = Vec::new();
 
     for (xi, yi) in neighbors {
@@ -46,44 +49,41 @@ fn valid_neighbors(neighbors: &Vec<RelPoint>, w: usize, h: usize, x: usize, y: u
     out
 }
 
-fn gen_double_neighbors(neighbors: &Vec<RelPoint>) -> Vec<RelPoint> {
-    let mut out = HashSet::new();
+fn gen_double_neighbors(neighbors: &[RelPoint]) -> Vec<RelPoint> {
+    let mut out = neighbors.iter().copied().collect::<HashSet<_>>();
 
-    for p1 in neighbors {
-        for p2 in neighbors {
-            out.insert((p1.0 + p2.0, p1.1 + p2.1));
+    for (x1, y1) in neighbors {
+        for (x2, y2) in neighbors {
+            out.insert((x1 + x2, y1 + y2));
         }
     }
 
-    for p in neighbors {
-        out.remove(p);
-    }
-    out.remove(&(0,0));
-
-    out.into_iter().collect()
+    let mut out = out.into_iter().collect::<Vec<_>>();
+    out.sort_unstable();
+    out
 }
 
 impl Game {
     pub fn new(neighbors: Vec<RelPoint>) -> Self {
         let double_neighbors = gen_double_neighbors(&neighbors);
 
-        Game{grid: Vec::new(), nmines: 0, neighbors, double_neighbors}
+        Game{grid: Vec::new(), failed: false, nmines: 0, neighbors, double_neighbors}
     }
 
-    pub fn random_puzzle(&mut self, width: usize, height: usize, mines: usize, start: Point) {
-        let (x, y) = start;
+    pub fn random_puzzle(&mut self, size: Point, mines: usize, start: Point) {
+        let (width, height) = size;
         let mut rng = thread_rng();
         let squares = width * height;
 
-        let mut no_mines = valid_neighbors(&self.neighbors, width, height, x, y);
-        no_mines.push((x, y));
+        let mut no_mines = valid_neighbors(&self.neighbors, size, start);
+        no_mines.push(start);
 
         let mut random_mines = vec![0; squares - no_mines.len()];
         let mut j = 0;
 
         self.grid = vec![vec![false; width]; height];
 
-        for i in 0..random_mines.len() {
+        for i in 0..width * height {
             let x2 = i % width;
             let y2 = i / width;
 
@@ -94,7 +94,7 @@ impl Game {
         }
 
         for i in 0..mines {
-            random_mines.swap(i, rng.gen_range(i, squares - no_mines.len()));
+            random_mines.swap(i, rng.gen_range(i..squares - no_mines.len()));
             self.grid[random_mines[i] / width][random_mines[i] % width] = true;
         }
     }
@@ -108,23 +108,18 @@ impl Game {
     }
 
     pub fn get_neighbors(&self, point: Point) -> Vec<Point> {
-        let (x, y) = point;
-        let (w, h) = self.size();
-
-        valid_neighbors(&self.neighbors, w, h, x, y)
+        valid_neighbors(&self.neighbors, self.size(), point)
     }
 
     pub fn get_double_neighbors(&self, point: Point) -> Vec<Point> {
-        let (x, y) = point;
-        let (w, h) = self.size();
-
-        valid_neighbors(&self.double_neighbors, w, h, x, y)
+        valid_neighbors(&self.double_neighbors, self.size(), point)
     }
 
-    pub fn get_square(&mut self, point: Point) -> Option<usize> {
+    pub fn explore_square(&mut self, point: Point) -> Option<usize> {
         let (x, y) = point;
 
         if self.grid[y][x] {
+            self.failed = true;
             return None;
         }
 
