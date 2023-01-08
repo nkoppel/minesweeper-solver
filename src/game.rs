@@ -1,6 +1,7 @@
 use rand::{thread_rng, Rng};
 
 use std::collections::HashSet;
+use std::rc::Rc;
 
 pub type Point = (usize, usize);
 pub type RelPoint = (isize, isize);
@@ -10,8 +11,8 @@ pub struct Game {
     pub grid: Vec<Vec<bool>>,
     pub nmines: usize,
     pub failed: bool,
-    neighbors: Vec<RelPoint>,
-    double_neighbors: Vec<RelPoint>,
+    neighbors: Rc<Vec<RelPoint>>,
+    double_neighbors: Rc<Vec<RelPoint>>,
 }
 
 pub const MOORE_NEIGHBORHOOD: [RelPoint; 8] = 
@@ -19,6 +20,13 @@ pub const MOORE_NEIGHBORHOOD: [RelPoint; 8] =
         (-1, -1), ( 0, -1), ( 1, -1),
         (-1,  0),           ( 1,  0),
         (-1,  1), ( 0,  1), ( 1,  1)
+    ];
+
+pub const VON_NEUMANN_NEIGHBORHOOD: [RelPoint; 4] = 
+    [
+                  ( 0, -1),
+        (-1,  0),           ( 1,  0),
+                  ( 0,  1),
     ];
 
 pub const KNIGHT_NEIGHBORHOOD: [RelPoint; 8] =
@@ -30,23 +38,25 @@ pub const KNIGHT_NEIGHBORHOOD: [RelPoint; 8] =
                (-1,  2),   ( 1,  2),
     ];
 
-fn valid_neighbors(neighbors: &[RelPoint], size: Point, point: Point)
-    -> Vec<Point>
+fn valid_neighbors(neighbors: Rc<Vec<RelPoint>>, size: Point, point: Point)
+    -> impl Iterator<Item = Point>
 {
     let (w, h) = size;
     let (x, y) = point;
-    let mut out = Vec::new();
 
-    for (xi, yi) in neighbors {
-        let x2 = x as isize + *xi;
-        let y2 = y as isize + *yi;
+    (0..neighbors.len())
+        .filter_map(move |i| {
+            let (xi, yi) = neighbors[i];
 
-        if x2 >= 0 && y2 >= 0 && x2 < w as isize && y2 < h as isize {
-            out.push((x2 as usize, y2 as usize));
-        }
-    }
+            let x2 = x as isize + xi;
+            let y2 = y as isize + yi;
 
-    out
+            if (0..w as isize).contains(&x2) && (0..h as isize).contains(&y2)  {
+                Some((x2 as usize, y2 as usize))
+            } else {
+                None
+            }
+        })
 }
 
 fn gen_double_neighbors(neighbors: &[RelPoint]) -> Vec<RelPoint> {
@@ -67,15 +77,23 @@ impl Game {
     pub fn new(neighbors: Vec<RelPoint>) -> Self {
         let double_neighbors = gen_double_neighbors(&neighbors);
 
-        Game{grid: Vec::new(), failed: false, nmines: 0, neighbors, double_neighbors}
+        Game {
+            grid: Vec::new(),
+            failed: false,
+            nmines: 0,
+            neighbors: Rc::new(neighbors),
+            double_neighbors: Rc::new(double_neighbors),
+        }
     }
 
     pub fn random_puzzle(&mut self, size: Point, mines: usize, start: Point) {
+        self.nmines = mines;
+
         let (width, height) = size;
         let mut rng = thread_rng();
         let squares = width * height;
 
-        let mut no_mines = valid_neighbors(&self.neighbors, size, start);
+        let mut no_mines = valid_neighbors(self.neighbors.clone(), size, start).collect::<Vec<_>>();
         no_mines.push(start);
 
         let mut random_mines = vec![0; squares - no_mines.len()];
@@ -101,18 +119,23 @@ impl Game {
 
     pub fn set_puzzle(&mut self, grid: Vec<Vec<bool>>) {
         self.grid = grid;
+        self.nmines = self.grid
+            .iter()
+            .flat_map(|row| row.iter())
+            .map(|b| *b as usize)
+            .sum::<usize>();
     }
 
     pub fn size(&self) -> (usize, usize) {
         (self.grid[0].len(), self.grid.len())
     }
 
-    pub fn get_neighbors(&self, point: Point) -> Vec<Point> {
-        valid_neighbors(&self.neighbors, self.size(), point)
+    pub fn get_neighbors(&self, point: Point) -> impl Iterator<Item = Point> {
+        valid_neighbors(self.neighbors.clone(), self.size(), point)
     }
 
-    pub fn get_double_neighbors(&self, point: Point) -> Vec<Point> {
-        valid_neighbors(&self.double_neighbors, self.size(), point)
+    pub fn get_double_neighbors(&self, point: Point) -> impl Iterator<Item = Point> {
+        valid_neighbors(self.double_neighbors.clone(), self.size(), point)
     }
 
     pub fn explore_square(&mut self, point: Point) -> Option<usize> {

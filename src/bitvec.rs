@@ -11,7 +11,7 @@ const SMALLVEC_ELEMENTS: usize = 64 / BITS;
 #[derive(Clone)]
 pub struct BitVec {
     /// the set of bits stored in the vector
-    /// note that bits outside of the vector can be "dirty" without issue
+    /// note that bits outside of the vector are allowed to have arbitrary values
     bits: SmallVec<[usize; SMALLVEC_ELEMENTS]>,
     len: usize
 }
@@ -29,7 +29,7 @@ impl BitVec {
 
         if value {
             if let Some(last) = bits.last_mut() {
-                *last = (1 << len % BITS) - 1;
+                *last = (1 << (len % BITS)) - 1;
             }
         }
 
@@ -51,7 +51,7 @@ impl BitVec {
             }
             Ordering::Greater => {
                 if let Some(last) = self.bits.last_mut() {
-                    *last |= if value { !((1 << len % BITS) - 1) } else {0};
+                    *last |= if value { !((1 << (len % BITS)) - 1) } else {0};
                 }
                 self.bits.resize(new_vec_len, if value {usize::MAX} else {0});
                 self.len = len;
@@ -63,7 +63,7 @@ impl BitVec {
     pub fn set(&mut self, idx: usize, value: bool) {
         assert!(idx < self.len);
 
-        let bit = 1 << idx % BITS;
+        let bit = 1 << (idx % BITS);
 
         self.bits[idx / BITS] &= !bit;
         self.bits[idx / BITS] |= if value {bit} else {0};
@@ -73,12 +73,12 @@ impl BitVec {
         if idx >= self.len() {
             None
         } else {
-            Some(self.bits[idx / BITS] & (1 << idx % BITS) != 0)
+            Some(self.bits[idx / BITS] & (1 << (idx % BITS)) != 0)
         }
     }
 
     pub fn push(&mut self, value: bool) {
-        if self.len % BITS == 0 {
+        if self.len % BITS == BITS - 1 {
             self.bits.push(0);
         }
 
@@ -87,13 +87,12 @@ impl BitVec {
     }
 
     pub fn leading_zeros(&self) -> usize {
-        let mut i = 0;
+        let Some(i) = self
+            .iter_elems()
+            .position(|x| x != 0)
+            else {return self.len()};
 
-        while i < self.bits.len() && self.bits[i] == 0 {
-            i += 1;
-        }
-
-        i * 64 + self.bits[i].trailing_zeros() as usize
+        (i * BITS + self.bits[i].trailing_zeros() as usize).min(self.len())
     }
 
     pub fn count_ones(&self) -> usize {
@@ -103,10 +102,21 @@ impl BitVec {
             .sum::<usize>();
 
         if let Some(last) = self.bits.last() {
-            out += (last & ((1 << self.len % BITS) - 1)).count_ones() as usize;
+            // println!("{} {} {:x}", self.bits.len(), self.len, ((1 << (self.len % BITS)) - 1));
+            out += (last & ((1 << (self.len % BITS)) - 1)).count_ones() as usize;
         }
 
         out
+    }
+
+    pub fn has_ones(&self) -> bool {
+        if self.bits[..self.bits.len().saturating_sub(1)].iter().any(|x| *x != 0) {
+            true
+        } else if let Some(last) = self.bits.last() {
+            (last & ((1 << (self.len % BITS)) - 1)) != 0
+        } else {
+            false
+        }
     }
 
     pub fn iter_elems(&self) -> impl Iterator<Item = usize> + '_ {
@@ -115,6 +125,13 @@ impl BitVec {
 
     pub fn iter_elems_mut(&mut self) -> impl Iterator<Item = &mut usize> {
         self.bits.iter_mut()
+    }
+
+    pub fn iter_ones(&self) -> impl Iterator<Item = usize> + '_ {
+        self.iter_elems()
+            .enumerate()
+            .flat_map(|(i, elem)| LocIter(elem).map(move |x| x + i * BITS))
+            .filter(|i| *i < self.len())
     }
 
     pub fn iter(&self) -> BitVecIter {
@@ -177,14 +194,6 @@ impl BitVec {
     pub fn or_assign (&mut self, other: &Self) { self.op_assign(other, |a, b| *a |= b) }
     pub fn and_assign(&mut self, other: &Self) { self.op_assign(other, |a, b| *a &= b) }
     pub fn xor_assign(&mut self, other: &Self) { self.op_assign(other, |a, b| *a ^= b) }
-
-    pub fn iter_ones(&self) -> IterOnes<'_> {
-        IterOnes {
-            vec: self,
-            idx: 0,
-            value: *self.bits.get(0).unwrap_or(&0)
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -275,37 +284,6 @@ impl Iterator for BitVecIter<'_> {
         if let Some(out) = self.vec.get(self.idx) {
             self.idx += 1;
             Some(out)
-        } else {
-            None
-        }
-    }
-}
-
-pub struct IterOnes<'a> {
-    vec: &'a BitVec,
-    idx: usize,
-    value: usize,
-}
-
-impl<'a> Iterator for IterOnes<'a> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<usize> {
-        while self.value == 0 {
-            if self.idx < self.vec.bits.len().saturating_sub(1) {
-                self.idx += 1;
-                self.value = self.vec.bits[self.idx];
-            } else {
-                return None;
-            }
-        }
-
-        let bit = self.value.trailing_zeros();
-        self.value = self.value & !(1 << bit);
-        let idx = self.idx * 64 + bit as usize;
-
-        if idx < self.vec.len() {
-            Some(idx)
         } else {
             None
         }

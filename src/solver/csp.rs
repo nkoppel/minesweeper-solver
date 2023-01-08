@@ -3,15 +3,8 @@ use crate::bitvec::BitVec;
 
 #[derive(Clone, Debug)]
 pub struct SubSolutionSet {
-    mask: BitVec,
-    solutions: Vec<BitVec>,
-}
-
-pub struct SolutionSet {
-    subsolutions: Vec<SubSolutionSet>,
-    // TODO: use bigints
-    subsolution_count_probabilities: Vec<HashMap<usize, f64>>,
-    mine_probabilities: Vec<f64>,
+    pub(super) mask: BitVec,
+    pub(super) solutions: Vec<BitVec>,
 }
 
 pub struct CombinationsIter {
@@ -52,22 +45,16 @@ fn equal_on_intersection(intersection: &BitVec, a: &BitVec, b: &BitVec) -> bool 
     // println!("{intersection:?}");
     // println!("{a:?}");
     // println!("{b:?}");
-    for (i, (a, b)) in intersection.iter_elems().zip(Iterator::zip(a.iter_elems(), b.iter_elems())) {
-        if a & i != b & i {
-            // println!("f\n");
-            return false;
-        }
-    }
 
-    // println!("t\n");
-    return true;
+    intersection
+        .iter_elems()
+        .zip(Iterator::zip(a.iter_elems(), b.iter_elems()))
+        .all(|(i, (a, b))| a & i == b & i)
 }
 
 impl SubSolutionSet {
     pub fn from_constraint(mask: BitVec, count: usize) -> Self {
         let n_constrained = mask.count_ones();
-
-        // println!("{n_constrained}");
 
         let solutions = CombinationsIter::new((1 << n_constrained) - 1, count)
             .map(|bits| mask.deposit_bits(bits))
@@ -82,19 +69,40 @@ impl SubSolutionSet {
     /// Outputs two masks representing whether each variable
     /// is proveably 1 and proveably 0
     pub fn get_solved(&self) -> (BitVec, BitVec) {
-        let mut solved_ones = self.mask.clone();
-        let mut solved_zeros = self.mask.clone();
+        if self.len() == 0 {
+            return (BitVec::new(false, self.variables()), BitVec::new(false, self.variables()));
+        }
+        let mut mines = self.mask.clone();
+        let mut safe = self.mask.clone();
 
-        solved_zeros.invert_inplace();
+        safe.invert_inplace();
 
         for solution in &self.solutions {
-            solved_ones &= solution;
-            solved_zeros |= solution;
+            mines &= solution;
+            safe |= solution;
         }
 
-        solved_zeros.invert_inplace();
+        safe.invert_inplace();
 
-        (solved_ones, solved_zeros)
+        (mines, safe)
+    }
+
+    pub fn get_counts(&self) -> HashMap<usize, usize> {
+        let mut out = HashMap::new();
+
+        for count in self.solutions.iter().map(|s| s.count_ones()) {
+            *out.entry(count).or_insert(0) += 1;
+        }
+
+        out
+    }
+
+    pub fn len(&self) -> usize {
+        self.solutions.len()
+    }
+
+    pub fn variables(&self) -> usize {
+        self.mask.len()
     }
 
     pub fn merge(&self, other: &Self) -> Self {
@@ -110,11 +118,20 @@ impl SubSolutionSet {
             }
         }
 
+        // if solutions.len() == 0 {
+            // println!("{self:?}");
+            // println!("{other:?}");
+            // println!("{solutions:?}");
+            // panic!();
+        // }
+
+        // println!("merge {} {} {}", self.mask.count_ones(), other.mask.count_ones(), mask.count_ones());
+
         Self { mask, solutions }
     }
 }
 
-pub fn merge_all_subsolutions(sols: &mut Vec<SubSolutionSet>) {
+pub fn merge_all_subsolutions(sols: &mut Vec<SubSolutionSet>) -> Option<(BitVec, BitVec)> {
     let mut i = 0;
 
     while i < sols.len() {
@@ -127,15 +144,30 @@ pub fn merge_all_subsolutions(sols: &mut Vec<SubSolutionSet>) {
             .max();
 
         if let Some((_, j)) = pos {
-            // print!("{} {} ", sols[i].solutions.len(), sols[j].solutions.len());
             sols[i] = sols[i].merge(&sols[j]);
-            // println!("{}", sols[i].solutions.len());
             sols.swap_remove(j);
         } else {
             i += 1;
         }
+    }
 
-        // println!();
-        // println!("{sols:?}");
+    let mut mines = BitVec::new(false, sols.get(0)?.variables());
+    let mut safe = BitVec::new(false, sols.get(0)?.variables());
+
+    // println!();
+
+    for sol in sols.iter() {
+        let (m, s) = sol.get_solved();
+
+        // println!("{} {m:?} {s:?}", sol.len());
+
+        mines |= &m;
+        safe |= &s;
+    }
+
+    if safe.count_ones() > 0 {
+        Some((mines, safe))
+    } else {
+        None
     }
 }

@@ -1,25 +1,26 @@
 use crate::game::*;
 use crate::solver::*;
-use crate::csp::*;
 use crate::bitvec::*;
+use crate::solver::solutionset::SolutionSet;
+
+use super::csp::*;
 
 use std::collections::HashMap;
 
 impl Solver {
     pub fn propogate(&mut self, point: Point) {
-        let mut stack = self.game.get_neighbors(point);
+        let mut stack = self.game.get_neighbors(point).collect::<Vec<_>>();
 
         stack.push(point);
 
         while let Some(point) = stack.pop() {
             let Num(nmines) = self.get_point(point) else {continue};
 
-            let neighbors = self.game.get_neighbors(point);
             let mut nmines_found = 0;
             let mut nempty = 0;
 
-            for point2 in &neighbors {
-                match self.get_point(*point2) {
+            for point2 in self.game.get_neighbors(point) {
+                match self.get_point(point2) {
                     Mine => nmines_found += 1,
                     Empty => nempty += 1,
                     _ => ()
@@ -31,28 +32,28 @@ impl Solver {
             } else if nmines_found == *nmines {
                 let mut changed = false;
 
-                for point2 in &neighbors {
-                    if *self.get_point(*point2) != Mine {
-                        self.uncover_point(*point2);
+                for point2 in self.game.get_neighbors(point) {
+                    if *self.get_point(point2) != Mine {
+                        self.uncover_point(point2);
                         changed = true;
                     }
                 }
 
                 if changed {
-                    stack.append(&mut self.game.get_neighbors(point));
+                    stack.extend(self.game.get_neighbors(point));
                 }
             } else if nempty == nmines - nmines_found {
                 let mut changed = false;
 
-                for point2 in &neighbors {
-                    if *self.get_point(*point2) == Empty {
-                        self.set_point(*point2, Mine);
+                for point2 in self.game.get_neighbors(point) {
+                    if *self.get_point(point2) == Empty {
+                        self.set_point(point2, Mine);
                         changed = true;
                     }
                 }
 
                 if changed {
-                    stack.append(&mut self.game.get_double_neighbors(point));
+                    stack.extend(self.game.get_double_neighbors(point));
                 }
             }
         }
@@ -109,20 +110,53 @@ impl Solver {
         (points2, rows)
     }
 
-    pub fn solve_csp(&mut self) {
-        let (points, rows) = self.extract_constraints();
-        let mut subsolutions = rows
-            .into_iter()
-            .map(|(mask, count)| SubSolutionSet::from_constraint(mask, count))
-            .collect::<Vec<_>>();
+    pub fn remaining_mines_empties(&self) -> (usize, usize) {
+        let placed_mines = self.grid
+            .iter()
+            .flat_map(|row| row.iter())
+            .map(|square| usize::from(*square == Mine))
+            .sum::<usize>();
 
-        // println!("{subsolutions:?}");
+        let empties = self.grid
+            .iter()
+            .flat_map(|row| row.iter())
+            .map(|square| usize::from(*square == Mine))
+            .sum::<usize>();
 
-        merge_all_subsolutions(&mut subsolutions);
+        (self.game.nmines - placed_mines, empties)
+    }
 
-        // println!("{points:?}");
-        // println!("{}", points.len());
-        // println!();
-        // println!("{subsolutions:?}");
+    pub fn solve_csp(&mut self, start: Point) -> Option<SolutionSet> {
+        self.propogate(start);
+
+        loop {
+            println!("{self}");
+
+            let (points, rows) = self.extract_constraints();
+            let mut subsolutions = rows
+                .into_iter()
+                .map(|(mask, count)| SubSolutionSet::from_constraint(mask, count))
+                .collect::<Vec<_>>();
+
+            // println!("{points:?}");
+
+            // println!("{subsolutions:?}");
+
+            if let Some((mines, safe)) = merge_all_subsolutions(&mut subsolutions) {
+                for i in mines.iter_ones() {
+                    self.set_point(points[i], Mine);
+                }
+
+                for i in safe.iter_ones() {
+                    self.uncover_point(points[i]);
+                    self.propogate(points[i]);
+                }
+            } else if !subsolutions.is_empty() {
+                let (remaining_mines, remaining_empties) = self.remaining_mines_empties();
+                return Some(SolutionSet::new(subsolutions, remaining_empties, remaining_mines));
+            } else {
+                return None;
+            }
+        }
     }
 }

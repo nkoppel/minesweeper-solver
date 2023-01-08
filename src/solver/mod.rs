@@ -1,3 +1,5 @@
+mod csp;
+mod solutionset;
 mod solve;
 
 pub use std::collections::{HashSet, VecDeque};
@@ -47,7 +49,12 @@ impl Solver {
     pub fn uncover_point(&mut self, point: Point) {
         match self.game.explore_square(point) {
             Some(n) => self.set_point(point, Num(n)),
-            None => println!("blew up at: {point:?}") //panic!("Blew up")
+            None => {
+                println!("{self}");
+                self.set_point(point, Mine);
+                println!("{self}");
+                panic!("blew up at: {point:?}");
+            }
         }
     }
 }
@@ -60,7 +67,7 @@ impl fmt::Display for Solver {
             for x in row {
                 match x {
                     Num(0) => write!(f, "``")?,
-                    Num(n) => write!(f, "{} ", n)?,
+                    Num(n) => write!(f, "{n} ")?,
                     Mine => write!(f, "* ")?,
                     Empty => write!(f, "  ")?,
                 }
