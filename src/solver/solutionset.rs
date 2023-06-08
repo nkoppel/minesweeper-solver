@@ -1,10 +1,10 @@
-use rand::Rng;
+use rand::prelude::*;
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::rc::Rc;
 
-use super::csp::*;
-use crate::bitvec::*;
+use super::{csp::*, *};
+use crate::{bitvec::*, game::*};
 
 use ibig::{UBig, ubig};
 
@@ -26,6 +26,7 @@ static FACTORIALS: RwLock<Vec<UBig>> = RwLock::new(Vec::new());
 
 pub fn factorial(n: usize) -> UBig {
     let factorials = FACTORIALS.read().expect("RwLock was poisoned");
+
     if let Some(out) = factorials.get(n) {
         out.clone()
     } else {
@@ -115,7 +116,6 @@ impl<I: Iterator<Item = T> + Clone, T: Clone> Iterator for OuterProductIter<I, T
 
         buf[loc] = new_elem.expect("new_elem was not Some");
 
-        #[allow(clippy::needless_range_loop)] // "i" indexes 3 vectors
         for i in loc + 1..self.iters.len() {
             self.active_iters[i] = self.iters[i].clone();
             buf[i] = self.active_iters[i].next().expect("iters contains an empty iterator");
@@ -147,7 +147,7 @@ impl SolutionSet {
         self.mine_probabilities = vec![ubig!(0); self.subsolutions[0].mask.len()];
         self.unconstrained_probability = ubig!(0);
 
-        println!("{:?}", self.num_with_count);
+        // println!("{:?}", self.num_with_count);
 
         for keys in OuterProductIter::new(self.num_with_count.iter().map(|map| map.keys())) {
             let n_mines = keys.iter().copied().sum::<usize>();
@@ -162,7 +162,7 @@ impl SolutionSet {
                 product *= n_choose_k(unconstrained_empty, remaining_mines - n_mines);
             }
 
-            println!("{keys:?} {remaining_mines} {n_mines} {product}");
+            // println!("{keys:?} {remaining_mines} {n_mines} {product}");
 
             let solutions_mut = self.solutions_with_count.iter_mut()
                 .zip(keys.iter())
@@ -181,7 +181,9 @@ impl SolutionSet {
                     .or_insert_with(|| ProbabilityTree::with_total(product.clone()))
             }
 
-            self.unconstrained_probability += product * (remaining_mines - n_mines) / unconstrained_empty;
+            if n_mines < remaining_mines && unconstrained_empty > 0 {
+                self.unconstrained_probability += product * (remaining_mines - n_mines) / unconstrained_empty;
+            }
         }
 
         let zero = ubig!(0);
@@ -191,37 +193,21 @@ impl SolutionSet {
             .zip(self.solutions_with_count.iter()
                 .zip(self.num_with_count.iter()));
 
-        println!();
-        println!("sol counts {:?}", self.solutions_with_count);
+        // println!();
+        // println!("sol counts {:?}", self.solutions_with_count);
 
         for (solutions, (solution_counts, num_with_count)) in iter {
             for sol in &solutions.solutions {
                 let n_solutions = solution_counts.get(&sol.count_ones()).unwrap_or(&zero)
                     / num_with_count.get(&sol.count_ones()).unwrap_or(&1);
 
-                println!("{sol:?} {n_solutions}");
+                // println!("{sol:?} {n_solutions}");
 
                 for i in sol.iter_ones() {
                     self.mine_probabilities[i] += &n_solutions;
                 }
             }
         }
-    }
-
-    pub fn new(subsolutions: Vec<SubSolutionSet>, remaining_empty: usize, remaining_mines: usize) -> Self {
-        let mut out = Self {
-            subsolutions,
-            num_with_count: Vec::new(),
-            solutions_with_count: Vec::new(),
-            count_prob_tree: ProbabilityTree::new(),
-            mine_probabilities: Vec::new(),
-            unconstrained_probability: ubig!(0),
-        };
-
-        if !out.subsolutions.is_empty() {
-            out.init(remaining_empty, remaining_mines);
-        }
-        out
     }
 
     // returns a soulution uniformly distributed from all remaining solutions
@@ -263,6 +249,54 @@ impl SolutionSet {
             i += 1;
         }
 
+        out
+    }
+
+    pub fn sample_game<R: Rng + ?Sized>(&mut self, solver: Solver, points: &[Point], rng: &mut R) -> Game {
+        let sample = self.sample(rng);
+        let mut out = solver.grid
+            .iter()
+            .map(|row| row.iter().map(|x| *x == Mine).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
+        for mine in sample.iter_ones() {
+            let point = points[mine];
+            out[point.1][point.0] = true;
+        }
+
+        let remaining_mines = solver.remaining_mines_empties().0 - sample.count_ones();
+
+        let mut empties = solver.grid
+            .iter()
+            .enumerate()
+            .flat_map(|(y, row)| row.iter().enumerate().map(move |(x, a)| ((x, y), a)))
+            .filter(|(point, x)| **x == Empty && !points.contains(point))
+            .collect::<Vec<_>>();
+
+        let (mines, _) = empties.partial_shuffle(rng, remaining_mines);
+
+        for (point, _) in mines {
+            out[point.1][point.0] = true;
+        }
+
+        let mut game = Game::new(solver.game.neighbors.to_vec());
+        game.set_puzzle(out);
+        game
+    }
+
+    pub fn new(subsolutions: Vec<SubSolutionSet>, remaining_empty: usize, remaining_mines: usize) -> Self {
+        let mut out = Self {
+            subsolutions,
+            num_with_count: Vec::new(),
+            solutions_with_count: Vec::new(),
+            count_prob_tree: ProbabilityTree::new(),
+            mine_probabilities: Vec::new(),
+            unconstrained_probability: ubig!(0),
+        };
+
+        if !out.subsolutions.is_empty() {
+            out.init(remaining_empty, remaining_mines);
+        }
         out
     }
 }

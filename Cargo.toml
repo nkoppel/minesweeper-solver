@@ -4,14 +4,14 @@ version = "0.1.0"
 authors = ["Nathan Koppel <nathankoppel0@gmail.com>"]
 edition = "2021"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
+# [lib]
+# crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 
 getrandom = { version = "0.2", features = ["js"] }
 rand = "0.8"
 smallvec = { version = "1.10", features = ["union"] }
+bitvec = "1"
 ibig = { version = "0.3", features = ["rand"] }
-# dfdx = { version = "0.10", features = ["intel-mkl"] }
-dfdx = "0.10"
+# dfdx = "0.11"

@@ -1,54 +1,59 @@
 #![allow(dead_code)]
 
 mod game;
-mod bitvec;
 mod solver;
+// mod search;
 
-use crate::game::*;
-use crate::solver::*;
+pub use crate::game::*;
+pub use crate::solver::*;
 
 fn main() {
-    // for _i in 0..10000 {
-        let mut game = Game::new(MOORE_NEIGHBORHOOD.to_vec());
-        // let mut game = Game::new(VON_NEUMANN_NEIGHBORHOOD.to_vec());
+    // let mut game = Game2d::from_2d_grid(
+    // MOORE_NEIGHBORHOOD.to_vec(),
+    // &[
+    // vec![false, false, true , true , false, false],
+    // vec![false, false, false, false, false, false],
+    // vec![true , false, false, false, false, true ],
+    // vec![true , false, false, false, false, true ],
+    // vec![false, false, false, false, false, false],
+    // vec![false, false, true , true , false, false],
+    // ],
+    // );
 
-        // game.set_puzzle(vec![
-            // vec![false, false, false, true , false],
-            // vec![false, false, false, false, true ],
-            // vec![false, false, true , false, false],
-            // vec![false, false, false, false, false],
-            // vec![false, false, true , false, false],
-            // vec![false, false, false, false, true ],
-            // vec![false, false, false, true , false],
-            // vec![true , true , true , true , true ],
-            // vec![false, false, false, false, false],
-        // ]);
+    // let start = 14;
 
-        // game.set_puzzle(vec![
-            // vec![false, false, false, false, true ],
+    // let mut game = Game2d::from_2d_grid(
+        // MOORE_NEIGHBORHOOD.to_vec(),
+        // &[
             // vec![false, false, false, false, false],
-            // vec![false, false, false, true , false],
-            // vec![false, false, true , true , false],
-            // vec![true , false, false, false, false],
-        // ]);
+            // vec![false, false, false, false, false],
+            // vec![false, false, true, false, false],
+            // vec![true, false, false, true, false],
+        // ],
+    // );
 
-        let start = (0,0);
-        game.random_puzzle((30,16), 99, start);
+    // let start = 0;
+    let mut sum = 0;
+
+    for _ in 0..100000 {
+        let game = Game2d::new(30, 16, 99, MOORE_NEIGHBORHOOD.to_vec());
+        let start = 0;
 
         // println!("{game}");
 
         let mut solver = Solver::new(game);
-        solver.uncover_point(start);
+        solver.uncover_square(start);
+        solver.propogate(&mut vec![start]);
 
-        // solver.propogate(start);
+        // println!("{solver}");
 
-        // let sols = solver.solve_csp(start);
+        let sols = solver.solve_csp();
+        sum += sols.1.len();
+        // println!("{sols:?}");
+        // println!("{:?}", sols.1.iter().map(|s| s.num_solutions()).collect::<Vec<_>>());
 
-        // for sol in &sols {
-            // println!("{}", sol.len());
-        // }
+        // println!("{solver}");
+    }
 
-        // println!("vars: {}", sols.first().map(|s| s.variables()).unwrap_or(0));
-
-    // }
+    println!("{sum}");
 }

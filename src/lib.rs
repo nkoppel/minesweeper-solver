@@ -2,4 +2,7 @@
 
 mod game;
 mod solver;
-mod bitvec;
+// mod search;
+
+pub use crate::game::*;
+pub use crate::solver::*;

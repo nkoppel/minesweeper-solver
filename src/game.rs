@@ -1,35 +1,39 @@
-use rand::{thread_rng, Rng};
+use bitvec::prelude::*;
+use rand::prelude::*;
 
-use std::collections::HashSet;
-use std::rc::Rc;
-
-pub type Point = (usize, usize);
-pub type RelPoint = (isize, isize);
-
-#[derive(Clone, Debug)]
-pub struct Game {
-    pub grid: Vec<Vec<bool>>,
-    pub nmines: usize,
-    pub failed: bool,
-    neighbors: Rc<Vec<RelPoint>>,
-    double_neighbors: Rc<Vec<RelPoint>>,
+pub trait Game {
+    fn for_each_neighbor(&self, pos: usize, callback: impl FnMut(usize));
+    fn explore_square(&mut self, pos: usize) -> Option<u8>;
+    fn num_squares(&self) -> usize;
+    fn num_mines(&self) -> Option<usize>;
 }
 
-pub const MOORE_NEIGHBORHOOD: [RelPoint; 8] = 
+#[derive(Clone, Debug)]
+pub struct Game2d {
+    grid: BitVec,
+    width: usize,
+    num_mines: usize,
+    neighbors: Vec<(isize, isize)>,
+}
+
+#[rustfmt::skip]
+pub const MOORE_NEIGHBORHOOD: [(isize, isize); 8] = 
     [
         (-1, -1), ( 0, -1), ( 1, -1),
         (-1,  0),           ( 1,  0),
         (-1,  1), ( 0,  1), ( 1,  1)
     ];
 
-pub const VON_NEUMANN_NEIGHBORHOOD: [RelPoint; 4] = 
+#[rustfmt::skip]
+pub const VON_NEUMANN_NEIGHBORHOOD: [(isize, isize); 4] = 
     [
                   ( 0, -1),
         (-1,  0),           ( 1,  0),
                   ( 0,  1),
     ];
 
-pub const KNIGHT_NEIGHBORHOOD: [RelPoint; 8] =
+#[rustfmt::skip]
+pub const KNIGHT_NEIGHBORHOOD: [(isize, isize); 8] =
     [
                (-1, -2),   ( 1, -2),
         (-2, -1),                 ( 2, -1),
@@ -38,137 +42,126 @@ pub const KNIGHT_NEIGHBORHOOD: [RelPoint; 8] =
                (-1,  2),   ( 1,  2),
     ];
 
-fn valid_neighbors(neighbors: Rc<Vec<RelPoint>>, size: Point, point: Point)
-    -> impl Iterator<Item = Point>
-{
-    let (w, h) = size;
-    let (x, y) = point;
+fn valid_neighbors_2d(
+    neighbors: impl Iterator<Item = (isize, isize)>,
+    (w, h): (usize, usize),
+    (x, y): (usize, usize),
+) -> impl Iterator<Item = (usize, usize)> {
+    neighbors.filter_map(move |(xi, yi)| {
+        let x2 = (x as isize + xi) as usize;
+        let y2 = (y as isize + yi) as usize;
 
-    (0..neighbors.len())
-        .filter_map(move |i| {
-            let (xi, yi) = neighbors[i];
-
-            let x2 = x as isize + xi;
-            let y2 = y as isize + yi;
-
-            if (0..w as isize).contains(&x2) && (0..h as isize).contains(&y2)  {
-                Some((x2 as usize, y2 as usize))
-            } else {
-                None
-            }
-        })
+        ((0..w).contains(&x2) && (0..h).contains(&y2)).then_some((x2, y2))
+    })
 }
 
-fn gen_double_neighbors(neighbors: &[RelPoint]) -> Vec<RelPoint> {
-    let mut out = neighbors.iter().copied().collect::<HashSet<_>>();
-
-    for (x1, y1) in neighbors {
-        for (x2, y2) in neighbors {
-            out.insert((x1 + x2, y1 + y2));
-        }
+// returns n unique randome numbers from 0 to max - 1
+fn n_unique_random(max: usize, n: usize) -> impl Iterator<Item = usize> {
+    if n > max {
+        panic!("Cannot generate {n} random numbers from 0..{max}");
     }
 
-    let mut out = out.into_iter().collect::<Vec<_>>();
-    out.sort_unstable();
-    out
+    let mut vec: Vec<usize> = (0..max).collect();
+    let mut rng = rand::thread_rng();
+
+    (0..n).map(move |_| vec.swap_remove(rng.gen_range(0..vec.len())))
 }
 
-impl Game {
-    pub fn new(neighbors: Vec<RelPoint>) -> Self {
-        let double_neighbors = gen_double_neighbors(&neighbors);
+impl Game2d {
+    pub fn new(
+        width: usize,
+        height: usize,
+        num_mines: usize,
+        neighbors: Vec<(isize, isize)>,
+    ) -> Self {
+        let size = width * height;
+        let mut grid = bitvec![usize, Lsb0; 0; size];
 
-        Game {
-            grid: Vec::new(),
-            failed: false,
-            nmines: 0,
-            neighbors: Rc::new(neighbors),
-            double_neighbors: Rc::new(double_neighbors),
+        for i in n_unique_random(size, num_mines) {
+            grid.set(i, true);
+        }
+
+        Self {
+            grid,
+            width,
+            num_mines,
+            neighbors,
         }
     }
 
-    pub fn random_puzzle(&mut self, size: Point, mines: usize, start: Point) {
-        self.nmines = mines;
+    /// Constructs a game using the first width * height elements of 'grid'.
+    pub fn with_grid(
+        width: usize,
+        height: usize,
+        neighbors: Vec<(isize, isize)>,
+        grid: impl Iterator<Item = bool> + Clone,
+    ) -> Self {
+        let grid = grid.take(width * height);
+        let num_mines = grid.clone().map(|x| x as usize).sum();
+        let grid = grid.collect::<BitVec>();
 
-        let (width, height) = size;
-        let mut rng = thread_rng();
-        let squares = width * height;
+        assert_eq!(grid.len(), width * height);
 
-        let mut no_mines = valid_neighbors(self.neighbors.clone(), size, start).collect::<Vec<_>>();
-        no_mines.push(start);
-
-        let mut random_mines = vec![0; squares - no_mines.len()];
-        let mut j = 0;
-
-        self.grid = vec![vec![false; width]; height];
-
-        for i in 0..width * height {
-            let x2 = i % width;
-            let y2 = i / width;
-
-            if !no_mines.contains(&(x2, y2)) {
-                random_mines[j] = i;
-                j += 1;
-            }
-        }
-
-        for i in 0..mines {
-            random_mines.swap(i, rng.gen_range(i..squares - no_mines.len()));
-            self.grid[random_mines[i] / width][random_mines[i] % width] = true;
+        Self {
+            grid,
+            width,
+            num_mines,
+            neighbors,
         }
     }
 
-    pub fn set_puzzle(&mut self, grid: Vec<Vec<bool>>) {
-        self.grid = grid;
-        self.nmines = self.grid
-            .iter()
-            .flat_map(|row| row.iter())
-            .map(|b| *b as usize)
-            .sum::<usize>();
+    pub fn from_2d_grid(neighbors: Vec<(isize, isize)>, grid: &[Vec<bool>]) -> Self {
+        let width = grid[0].len();
+        let height = grid.len();
+        let iter = grid.iter().flatten().copied();
+
+        Self::with_grid(width, height, neighbors, iter)
     }
 
-    pub fn size(&self) -> (usize, usize) {
-        (self.grid[0].len(), self.grid.len())
+    fn neighbors_iter(&self, pos: usize) -> impl Iterator<Item = usize> + '_ {
+        let size = (self.width, self.grid.len() / self.width);
+        let pos = (pos % self.width, pos / self.width);
+
+        valid_neighbors_2d(self.neighbors.iter().copied(), size, pos)
+            .map(move |(x, y)| x + y * self.width)
     }
 
-    pub fn get_neighbors(&self, point: Point) -> impl Iterator<Item = Point> {
-        valid_neighbors(self.neighbors.clone(), self.size(), point)
+    pub fn width(&self) -> usize {
+        self.width
+    }
+}
+
+impl Game for Game2d {
+    fn for_each_neighbor(&self, pos: usize, callback: impl FnMut(usize)) {
+        self.neighbors_iter(pos).for_each(callback)
     }
 
-    pub fn get_double_neighbors(&self, point: Point) -> impl Iterator<Item = Point> {
-        valid_neighbors(self.double_neighbors.clone(), self.size(), point)
+    fn explore_square(&mut self, pos: usize) -> Option<u8> {
+        (!self.grid[pos]).then(|| self.neighbors_iter(pos).map(|i| self.grid[i] as u8).sum())
     }
 
-    pub fn explore_square(&mut self, point: Point) -> Option<usize> {
-        let (x, y) = point;
+    fn num_squares(&self) -> usize {
+        self.grid.len()
+    }
 
-        if self.grid[y][x] {
-            self.failed = true;
-            return None;
-        }
-
-        let mut out = 0;
-
-        for (x2, y2) in self.get_neighbors(point) {
-            out += self.grid[y2][x2] as usize;
-        }
-
-        Some(out)
+    fn num_mines(&self) -> Option<usize> {
+        Some(self.num_mines)
     }
 }
 
 use std::fmt;
 
-impl fmt::Display for Game {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for row in &self.grid {
-            for x in row {
-                if *x {
-                    write!(f, "1 ")?;
-                } else {
-                    write!(f, ". ")?;
-                }
+impl fmt::Display for Game2d {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (i, x) in self.grid.iter().enumerate() {
+            if *x {
+                write!(f, "* ")?;
+            } else {
+                write!(f, ". ")?;
             }
-            writeln!(f)?;
+            if i % self.width == self.width - 1 {
+                writeln!(f)?;
+            }
         }
         Ok(())
     }

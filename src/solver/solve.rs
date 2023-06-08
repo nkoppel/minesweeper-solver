@@ -1,162 +1,165 @@
 use crate::game::*;
-use crate::solver::*;
-use crate::bitvec::*;
-use crate::solver::solutionset::SolutionSet;
+use crate::solver::{*, csp::*};
 
-use super::csp::*;
+use smallvec::*;
 
-use std::collections::HashMap;
+impl<G: Game> Solver<G> {
+    // Assigns a group id to each empty cell so that empty cells with the same id are constrained
+    // by the same set of hints.
+    fn cell_groups(&self) -> Vec<Option<usize>> {
+        let mut table: Vec<usize> = Vec::with_capacity(self.grid.len());
+        let mut flags: Vec<bool> = Vec::with_capacity(self.grid.len());
+        let mut ids: Vec<usize> = vec![0; self.grid.len()];
 
-impl Solver {
-    pub fn propogate(&mut self, point: Point) {
-        let mut stack = self.game.get_neighbors(point).collect::<Vec<_>>();
+        let mut max_group = 1;
 
-        stack.push(point);
+        table.push(0);
+        flags.push(false);
 
-        while let Some(point) = stack.pop() {
-            let Num(nmines) = self.get_point(point) else {continue};
-
-            let mut nmines_found = 0;
-            let mut nempty = 0;
-
-            for point2 in self.game.get_neighbors(point) {
-                match self.get_point(point2) {
-                    Mine => nmines_found += 1,
-                    Empty => nempty += 1,
-                    _ => ()
-                }
-            }
-
-            if nempty == 0 {
+        for i in 0..self.grid.len() {
+            if !matches!(self.grid[i], Hint { .. }) {
                 continue;
-            } else if nmines_found == *nmines {
-                let mut changed = false;
-
-                for point2 in self.game.get_neighbors(point) {
-                    if *self.get_point(point2) != Mine {
-                        self.uncover_point(point2);
-                        changed = true;
-                    }
-                }
-
-                if changed {
-                    stack.extend(self.game.get_neighbors(point));
-                }
-            } else if nempty == nmines - nmines_found {
-                let mut changed = false;
-
-                for point2 in self.game.get_neighbors(point) {
-                    if *self.get_point(point2) == Empty {
-                        self.set_point(point2, Mine);
-                        changed = true;
-                    }
-                }
-
-                if changed {
-                    stack.extend(self.game.get_double_neighbors(point));
-                }
             }
+
+            self.game.for_each_neighbor(i, |j| {
+                if self.grid[j] != Empty {
+                    return;
+                }
+
+                let id = ids[j];
+
+                if !flags[id] {
+                    table[id] = max_group;
+                    flags[id] = true;
+                    max_group += 1;
+
+                    table.push(0);
+                    flags.push(false);
+                }
+            });
+
+            self.game.for_each_neighbor(i, |j| {
+                if self.grid[j] != Empty {
+                    return;
+                }
+
+                let id = ids[j];
+
+                ids[j] = table[id];
+                flags[id] = false;
+            });
         }
-    }
 
-    pub fn extract_constraints(&self) -> (Vec<Point>, Vec<(BitVec, usize)>) {
-        let mut points1 = HashMap::new();
-        let mut points2 = Vec::new();
-        let mut rows = Vec::new();
+        max_group = 0;
 
-        let (width, height) = self.game.size();
+        let mut out = vec![None; self.grid.len()];
 
-        for y in 0..height {
-            for x in 0..width {
-                let point = (x, y);
-
-                let Num(mut nmines) = self.get_point(point) else {continue};
-
-                let mut row = (BitVec::new(false, points2.len()), 0);
-                let mut has_empty = false;
-
-                for point2 in self.game.get_neighbors(point) {
-                    if *self.get_point(point2) != Empty {
-                        if *self.get_point(point2) == Mine {
-                            nmines -= 1;
-                        }
-                        continue;
-                    }
-                    has_empty = true;
-
-                    if let Some(id) = points1.get(&point2) {
-                        row.0.set(*id, true);
-                    } else {
-                        points1.insert(point2, points2.len());
-                        points2.push(point2);
-                        row.0.push(true);
-                    }
-                }
-
-                row.1 = nmines;
-
-                if has_empty {
-                    rows.push(row);
-                }
+        for (i, id) in ids.iter_mut().enumerate() {
+            if self.grid[i] != Empty || *id == 0 {
+                continue;
             }
+
+            if !flags[*id] {
+                table[*id] = max_group;
+                flags[*id] = true;
+                max_group += 1;
+            }
+
+            out[i] = Some(table[*id]);
         }
 
-        for row in &mut rows {
-            row.0.resize(points2.len(), false);
+        out
+    }
+
+    pub fn extract_constraints(&self) -> (Vec<Vec<usize>>, Vec<SubSolutionSet>) {
+        let cell_groups = self.cell_groups();
+        let mut cell_groups_out = Vec::new();
+
+        for (cell, group_id) in cell_groups.iter().enumerate().filter_map(|(i, x)| x.map(|y| (i, y))) {
+            if group_id >= cell_groups_out.len() {
+                cell_groups_out.resize(group_id + 1, Vec::new());
+            }
+
+            cell_groups_out[group_id].push(cell);
         }
 
-        // println!("{points1:?}");
+        let subsolutions = self
+            .grid
+            .iter()
+            .enumerate()
+            .filter_map(|(i, hint)| {
+                let Hint { remaining_mines, .. } = hint else { return None };
+                let mut mask = smallvec![0; cell_groups_out.len()];
+                let mut has_empty_neighbors = false;
 
-        (points2, rows)
+                self.game.for_each_neighbor(i, |j| {
+                    if self.grid[j] != Empty {
+                        return;
+                    }
+                    let group = cell_groups[j].unwrap();
+                    mask[group] = cell_groups_out[group].len() as u8;
+                    has_empty_neighbors = true;
+                });
+
+                has_empty_neighbors.then(|| {
+                    SubSolutionSet::from_constraint(mask, *remaining_mines as usize)
+                })
+            })
+            .collect();
+
+        (cell_groups_out, subsolutions)
     }
 
-    pub fn remaining_mines_empties(&self) -> (usize, usize) {
-        let placed_mines = self.grid
+    pub fn remaining_mines(&self) -> Option<usize> {
+        let placed_mines = self
+            .grid
             .iter()
-            .flat_map(|row| row.iter())
-            .map(|square| usize::from(*square == Mine))
-            .sum::<usize>();
+            .filter(|s| matches!(s, Mine { .. }))
+            .count();
 
-        let empties = self.grid
-            .iter()
-            .flat_map(|row| row.iter())
-            .map(|square| usize::from(*square == Mine))
-            .sum::<usize>();
-
-        (self.game.nmines - placed_mines, empties)
+        Some(self.game.num_mines()? - placed_mines)
     }
 
-    pub fn solve_csp(&mut self, start: Point) -> Option<SolutionSet> {
-        self.propogate(start);
+    pub fn remaining_empty_squares(&self) -> usize {
+        self.grid.iter().filter(|s| matches!(s, Empty)).count()
+    }
+
+    pub fn solve_csp(&mut self) -> (Vec<Vec<usize>>, Vec<SubSolutionSet>) {
+        let mut squares = Vec::new();
 
         loop {
-            println!("{self}");
+            let (groups, mut subsolutions) = self.extract_constraints();
 
-            let (points, rows) = self.extract_constraints();
-            let mut subsolutions = rows
-                .into_iter()
-                .map(|(mask, count)| SubSolutionSet::from_constraint(mask, count))
-                .collect::<Vec<_>>();
-
-            // println!("{points:?}");
-
-            // println!("{subsolutions:?}");
-
-            if let Some((mines, safe)) = merge_all_subsolutions(&mut subsolutions) {
-                for i in mines.iter_ones() {
-                    self.set_point(points[i], Mine);
-                }
-
-                for i in safe.iter_ones() {
-                    self.uncover_point(points[i]);
-                    self.propogate(points[i]);
-                }
-            } else if !subsolutions.is_empty() {
-                let (remaining_mines, remaining_empties) = self.remaining_mines_empties();
-                return Some(SolutionSet::new(subsolutions, remaining_empties, remaining_mines));
-            } else {
-                return None;
+            if subsolutions.is_empty() {
+                return (groups, subsolutions);
             }
+
+            merge_all_subsolutions(&mut subsolutions);
+
+            let (all_hints, all_mines) = solved_groups(&subsolutions);
+
+            squares.clear();
+
+            for i in all_hints.iter_ones() {
+                for square in &groups[i] {
+                    squares.push(*square);
+                    self.uncover_square(*square)
+                        .unwrap_or_else(|| panic!("Attempted to uncover mine at {square:?}!"));
+                }
+            }
+
+            for i in all_mines.iter_ones() {
+                for square in &groups[i] {
+                    squares.push(*square);
+                    self.flag_square(*square);
+                }
+            }
+
+            if squares.is_empty() {
+                return (groups, subsolutions);
+            }
+
+            self.propogate(&mut squares);
         }
     }
 }
