@@ -5,7 +5,17 @@ pub trait Game {
     fn for_each_neighbor(&self, pos: usize, callback: impl FnMut(usize));
     fn explore_square(&mut self, pos: usize) -> Option<u8>;
     fn num_squares(&self) -> usize;
-    fn num_mines(&self) -> Option<usize>;
+    fn num_mines(&self) -> usize;
+}
+
+pub trait InternalGame: Game + Clone {
+    fn set_grid(&mut self, grid: BitVec);
+
+    fn with_grid(&self, grid: BitVec) -> Self {
+        let mut out = self.clone();
+        out.set_grid(grid);
+        out
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -17,7 +27,7 @@ pub struct Game2d {
 }
 
 #[rustfmt::skip]
-pub const MOORE_NEIGHBORHOOD: [(isize, isize); 8] = 
+pub const MOORE_NEIGHBORHOOD: [(isize, isize); 8] =
     [
         (-1, -1), ( 0, -1), ( 1, -1),
         (-1,  0),           ( 1,  0),
@@ -25,7 +35,7 @@ pub const MOORE_NEIGHBORHOOD: [(isize, isize); 8] =
     ];
 
 #[rustfmt::skip]
-pub const VON_NEUMANN_NEIGHBORHOOD: [(isize, isize); 4] = 
+pub const VON_NEUMANN_NEIGHBORHOOD: [(isize, isize); 4] =
     [
                   ( 0, -1),
         (-1,  0),           ( 1,  0),
@@ -56,13 +66,12 @@ fn valid_neighbors_2d(
 }
 
 // returns n unique randome numbers from 0 to max - 1
-fn n_unique_random(max: usize, n: usize) -> impl Iterator<Item = usize> {
+pub(crate) fn n_unique_random(max: usize, n: usize, rng: &mut impl Rng) -> impl Iterator<Item = usize> + '_ {
     if n > max {
         panic!("Cannot generate {n} random numbers from 0..{max}");
     }
 
     let mut vec: Vec<usize> = (0..max).collect();
-    let mut rng = rand::thread_rng();
 
     (0..n).map(move |_| vec.swap_remove(rng.gen_range(0..vec.len())))
 }
@@ -73,11 +82,12 @@ impl Game2d {
         height: usize,
         num_mines: usize,
         neighbors: Vec<(isize, isize)>,
+        rng: &mut impl Rng,
     ) -> Self {
         let size = width * height;
         let mut grid = bitvec![usize, Lsb0; 0; size];
 
-        for i in n_unique_random(size, num_mines) {
+        for i in n_unique_random(size, num_mines, rng) {
             grid.set(i, true);
         }
 
@@ -144,8 +154,14 @@ impl Game for Game2d {
         self.grid.len()
     }
 
-    fn num_mines(&self) -> Option<usize> {
-        Some(self.num_mines)
+    fn num_mines(&self) -> usize {
+        self.num_mines
+    }
+}
+
+impl InternalGame for Game2d {
+    fn set_grid(&mut self, grid: BitVec) {
+        self.grid = grid;
     }
 }
 

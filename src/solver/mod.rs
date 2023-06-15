@@ -1,5 +1,5 @@
 mod csp;
-// mod solutionset;
+mod solutionset;
 mod solve;
 
 pub use std::collections::{HashSet, VecDeque};
@@ -12,6 +12,7 @@ pub use solve::*;
 pub enum Square {
     Empty,
     Mine { needs_propogate: bool },
+    AssertHint { needs_propogate: bool },
     Hint { remaining_mines: u8, empties: u8 },
 }
 
@@ -32,11 +33,13 @@ impl Square {
         match *self {
             Empty => false,
             Mine { needs_propogate } => needs_propogate,
+            AssertHint { needs_propogate } => needs_propogate,
             Hint { .. } => self.needs_flag_fill() || self.needs_hint_fill(),
         }
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct Solver<G: Game> {
     pub grid: Vec<Square>,
     pub game: G,
@@ -80,6 +83,27 @@ impl<G: Game> Solver<G> {
         };
 
         Some(())
+    }
+
+    /// Assert that a square is a hint without making any calls to Game::explore_square to discover
+    /// the square's value
+    pub fn assert_square(&mut self, square: usize) {
+        if self.grid[square] != Empty {
+            panic!();
+        }
+
+        self.grid[square] = AssertHint {
+            needs_propogate: true,
+        };
+
+        self.game.for_each_neighbor(square, |n| {
+            if let Hint {
+                ref mut empties, ..
+            } = self.grid[n]
+            {
+                *empties -= 1;
+            }
+        })
     }
 
     pub fn flag_square(&mut self, square: usize) {
@@ -147,6 +171,7 @@ impl fmt::Display for Solver<Game2d> {
             match x {
                 Empty => write!(f, ". ")?,
                 Mine { .. } => write!(f, "* ")?,
+                AssertHint { .. } => write!(f, "? ")?,
                 Hint {
                     remaining_mines, ..
                 } => write!(f, "{remaining_mines} ")?,

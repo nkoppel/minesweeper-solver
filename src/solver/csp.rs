@@ -3,8 +3,26 @@ use std::collections::HashMap;
 pub use bitvec::prelude::*;
 use smallvec::*;
 
-type MaskVec = SmallVec<[bool; 64]>;
-type IntVec = SmallVec<[u8; 64]>;
+pub type MaskVec = SmallVec<[bool; 64]>;
+pub type IntVec = SmallVec<[u8; 64]>;
+
+fn n_choose_k(n: usize, k1: usize) -> usize {
+    let k2 = n - k1;
+    let (k1, k2) = (k1.min(k2), k1.max(k2));
+
+    let f_k1 = (1..=k1).product::<usize>();
+    let f_k2 = f_k1 * (k1 + 1..=k2).product::<usize>();
+    let f_n = f_k2 * (k2 + 1..=n).product::<usize>();
+
+    f_n / (f_k1 * f_k2)
+}
+
+pub(super) fn solution_count(sol: &[u8], mask: &[u8]) -> usize {
+    sol.iter()
+        .zip(mask.iter())
+        .map(|(&s, &m)| n_choose_k(m as usize, s as usize))
+        .product()
+}
 
 #[derive(Clone, Debug)]
 pub struct SubSolutionSet {
@@ -76,23 +94,23 @@ impl Iterator for CombinationsIter {
     }
 }
 
-fn sum_to_usize(vec: &[u8]) -> usize {
+pub(super) fn sum_to_usize(vec: &[u8]) -> usize {
     vec.iter().map(|x| *x as usize).sum::<usize>()
 }
 
-fn intvec_or(v1: &[u8], v2: &[u8]) -> IntVec {
+pub(super) fn intvec_or(v1: &[u8], v2: &[u8]) -> IntVec {
     assert_eq!(v1.len(), v2.len());
 
     v1.iter().zip(v2.iter()).map(|(&a, &b)| a.max(b)).collect()
 }
 
-fn intvec_and(v1: &[u8], v2: &[u8]) -> IntVec {
+pub(super) fn intvec_and(v1: &[u8], v2: &[u8]) -> IntVec {
     assert_eq!(v1.len(), v2.len());
 
     v1.iter().zip(v2.iter()).map(|(&a, &b)| a.min(b)).collect()
 }
 
-pub fn equal_on_intersection(intersection: &[u8], a: &[u8], b: &[u8]) -> bool {
+pub(super) fn equal_on_intersection(intersection: &[u8], a: &[u8], b: &[u8]) -> bool {
     assert_eq!(intersection.len(), a.len());
     assert_eq!(a.len(), b.len());
 
@@ -111,8 +129,8 @@ impl SubSolutionSet {
 
     /// Returns two masks representing which groups are all hints and which are all mines
     pub fn solved_groups(&self) -> (BitVec, BitVec) {
-        let mut min_mines: IntVec = smallvec![u8::MAX; self.variables()];
-        let mut max_mines: IntVec = smallvec![0; self.variables()];
+        let mut min_mines: IntVec = smallvec![u8::MAX; self.num_variables()];
+        let mut max_mines: IntVec = smallvec![0; self.num_variables()];
 
         for sol in &self.solutions {
             sol.iter()
@@ -137,13 +155,12 @@ impl SubSolutionSet {
         (all_hints, all_mines)
     }
 
-    /// Returns a mapping from a number of mines contained within this solution to the number of
-    /// solutions with that number of mines
-    pub fn get_counts(&self) -> HashMap<usize, usize> {
+    /// Returns a mapping from a number of mines to a number of solutions with that number of mines
+    pub fn num_solutions_with_num_mines(&self) -> HashMap<usize, usize> {
         let mut out = HashMap::new();
 
-        for count in self.solutions.iter().map(|v| sum_to_usize(v)) {
-            *out.entry(count).or_insert(0) += 1;
+        for (count, s) in self.solutions.iter().map(|s| (sum_to_usize(s), s)) {
+            *out.entry(count).or_insert(0) += solution_count(s, &self.mask);
         }
 
         out
@@ -153,7 +170,7 @@ impl SubSolutionSet {
         self.solutions.len()
     }
 
-    pub fn variables(&self) -> usize {
+    pub fn num_variables(&self) -> usize {
         self.mask.len()
     }
 
@@ -257,7 +274,7 @@ pub fn merge_all_subsolutions(sols: &mut Vec<SubSolutionSet>) {
 }
 
 pub fn solved_groups(subsolutions: &[SubSolutionSet]) -> (BitVec, BitVec) {
-    let num_vars = subsolutions[0].variables();
+    let num_vars = subsolutions[0].num_variables();
 
     let mut all_hints = bitvec![usize, Lsb0; 0; num_vars];
     let mut all_mines = bitvec![usize, Lsb0; 0; num_vars];

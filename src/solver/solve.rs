@@ -1,11 +1,14 @@
 use crate::game::*;
-use crate::solver::{*, csp::*};
+use crate::solver::{csp::*, *};
 
+use itertools::Itertools;
 use smallvec::*;
 
+use super::solutionset::SolutionSet;
+
 impl<G: Game> Solver<G> {
-    // Assigns a group id to each empty cell so that empty cells with the same id are constrained
-    // by the same set of hints.
+    /// Assigns a group id to each empty cell so that empty cells with the same id are constrained
+    /// by the same set of hints.
     fn cell_groups(&self) -> Vec<Option<usize>> {
         let mut table: Vec<usize> = Vec::with_capacity(self.grid.len());
         let mut flags: Vec<bool> = Vec::with_capacity(self.grid.len());
@@ -16,11 +19,11 @@ impl<G: Game> Solver<G> {
         table.push(0);
         flags.push(false);
 
-        for i in 0..self.grid.len() {
-            if !matches!(self.grid[i], Hint { .. }) {
-                continue;
-            }
-
+        for i in self
+            .grid
+            .iter()
+            .positions(|c| matches!(c, Hint { empties: 1.., .. }))
+        {
             self.game.for_each_neighbor(i, |j| {
                 if self.grid[j] != Empty {
                     return;
@@ -75,7 +78,11 @@ impl<G: Game> Solver<G> {
         let cell_groups = self.cell_groups();
         let mut cell_groups_out = Vec::new();
 
-        for (cell, group_id) in cell_groups.iter().enumerate().filter_map(|(i, x)| x.map(|y| (i, y))) {
+        for (cell, group_id) in cell_groups
+            .iter()
+            .enumerate()
+            .filter_map(|(i, x)| x.map(|y| (i, y)))
+        {
             if group_id >= cell_groups_out.len() {
                 cell_groups_out.resize(group_id + 1, Vec::new());
             }
@@ -88,9 +95,8 @@ impl<G: Game> Solver<G> {
             .iter()
             .enumerate()
             .filter_map(|(i, hint)| {
-                let Hint { remaining_mines, .. } = hint else { return None };
+                let Hint { remaining_mines, empties: 1.. } = hint else { return None };
                 let mut mask = smallvec![0; cell_groups_out.len()];
-                let mut has_empty_neighbors = false;
 
                 self.game.for_each_neighbor(i, |j| {
                     if self.grid[j] != Empty {
@@ -98,40 +104,40 @@ impl<G: Game> Solver<G> {
                     }
                     let group = cell_groups[j].unwrap();
                     mask[group] = cell_groups_out[group].len() as u8;
-                    has_empty_neighbors = true;
                 });
 
-                has_empty_neighbors.then(|| {
-                    SubSolutionSet::from_constraint(mask, *remaining_mines as usize)
-                })
+                Some(SubSolutionSet::from_constraint(
+                    mask,
+                    *remaining_mines as usize,
+                ))
             })
             .collect();
 
         (cell_groups_out, subsolutions)
     }
 
-    pub fn remaining_mines(&self) -> Option<usize> {
+    pub fn remaining_mines(&self) -> usize {
         let placed_mines = self
             .grid
             .iter()
             .filter(|s| matches!(s, Mine { .. }))
             .count();
 
-        Some(self.game.num_mines()? - placed_mines)
+        self.game.num_mines() - placed_mines
     }
 
     pub fn remaining_empty_squares(&self) -> usize {
         self.grid.iter().filter(|s| matches!(s, Empty)).count()
     }
 
-    pub fn solve_csp(&mut self) -> (Vec<Vec<usize>>, Vec<SubSolutionSet>) {
+    pub fn solve_csp(&mut self) -> Option<SolutionSet<G>> {
         let mut squares = Vec::new();
 
         loop {
             let (groups, mut subsolutions) = self.extract_constraints();
 
             if subsolutions.is_empty() {
-                return (groups, subsolutions);
+                return None;
             }
 
             merge_all_subsolutions(&mut subsolutions);
@@ -156,7 +162,7 @@ impl<G: Game> Solver<G> {
             }
 
             if squares.is_empty() {
-                return (groups, subsolutions);
+                return Some(SolutionSet::new(self, groups, subsolutions));
             }
 
             self.propogate(&mut squares);

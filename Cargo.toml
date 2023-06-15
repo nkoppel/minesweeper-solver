@@ -14,4 +14,5 @@ rand = "0.8"
 smallvec = { version = "1.10", features = ["union"] }
 bitvec = "1"
 ibig = { version = "0.3", features = ["rand"] }
+itertools = "0.10"
 # dfdx = "0.11"
