@@ -66,7 +66,11 @@ fn valid_neighbors_2d(
 }
 
 // returns n unique randome numbers from 0 to max - 1
-pub(crate) fn n_unique_random(max: usize, n: usize, rng: &mut impl Rng) -> impl Iterator<Item = usize> + '_ {
+pub(crate) fn n_unique_random(
+    max: usize,
+    n: usize,
+    rng: &mut impl Rng,
+) -> impl Iterator<Item = usize> + '_ {
     if n > max {
         panic!("Cannot generate {n} random numbers from 0..{max}");
     }

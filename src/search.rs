@@ -13,3 +13,9 @@ struct TreeNode {
 struct Searcher {
     tree: HashMap<Vec<Square>, TreeNode>,
 }
+
+impl Searcher {
+    pub fn set_root(&mut self, root: &[Square]) {
+        self.tree.retain(|grid, _| grid_subset_of(grid, root));
+    }
+}

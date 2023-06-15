@@ -11,21 +11,35 @@ pub use solve::*;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Square {
     Empty,
-    Mine { needs_propogate: bool },
-    AssertHint { needs_propogate: bool },
-    Hint { remaining_mines: u8, empties: u8 },
+    Mine {
+        needs_propogate: bool,
+    },
+    AssertHint {
+        needs_propogate: bool,
+    },
+    Hint {
+        hint: u8,
+        remaining_mines: u8,
+        empties: u8,
+    },
 }
 
 pub use Square::*;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Solver<G: Game> {
+    pub grid: Vec<Square>,
+    pub game: G,
+}
+
 impl Square {
     fn needs_flag_fill(&self) -> bool {
-        let Hint { remaining_mines, empties } = *self else { return false };
+        let Hint { remaining_mines, empties, .. } = *self else { return false };
         remaining_mines > 0 && remaining_mines == empties
     }
 
     fn needs_hint_fill(&self) -> bool {
-        let Hint { remaining_mines, empties } = *self else { return false };
+        let Hint { remaining_mines, empties, .. } = *self else { return false };
         empties > 0 && remaining_mines == 0
     }
 
@@ -37,12 +51,22 @@ impl Square {
             Hint { .. } => self.needs_flag_fill() || self.needs_hint_fill(),
         }
     }
+
+    pub fn subset_of(&self, other: &Self) -> bool {
+        match (self, other) {
+            (_, Empty) => true,
+            (Hint { .. }, AssertHint { .. }) => true,
+            (Hint { hint: h1, .. }, Hint { hint: h2, .. }) => h1 == h2,
+            _ => false,
+        }
+    }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Solver<G: Game> {
-    pub grid: Vec<Square>,
-    pub game: G,
+pub fn grid_subset_of(subset: &[Square], set: &[Square]) -> bool {
+    subset
+        .iter()
+        .zip(set.iter())
+        .all(|(s1, s2)| s1.subset_of(s2))
 }
 
 impl<G: Game> Solver<G> {
@@ -78,6 +102,7 @@ impl<G: Game> Solver<G> {
         });
 
         self.grid[square] = Hint {
+            hint,
             remaining_mines: hint - mines,
             empties,
         };
@@ -119,6 +144,7 @@ impl<G: Game> Solver<G> {
             if let Hint {
                 ref mut remaining_mines,
                 ref mut empties,
+                ..
             } = self.grid[n]
             {
                 *remaining_mines -= 1;

@@ -95,7 +95,7 @@ impl<G: Game> Solver<G> {
             .iter()
             .enumerate()
             .filter_map(|(i, hint)| {
-                let Hint { remaining_mines, empties: 1.. } = hint else { return None };
+                let Hint { remaining_mines, empties: 1.., .. } = hint else { return None };
                 let mut mask = smallvec![0; cell_groups_out.len()];
 
                 self.game.for_each_neighbor(i, |j| {

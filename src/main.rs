@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 mod game;
-mod solver;
 mod search;
+mod solver;
 
 pub use crate::game::*;
 pub use crate::solver::*;
@@ -20,13 +20,13 @@ fn print_probs_2d(probs: &[f64], width: usize) {
 
 fn main() {
     // let game = Game2d::from_2d_grid(
-        // MOORE_NEIGHBORHOOD.to_vec(),
-        // &[
-            // vec![false, false, false, false, false, false, false, false],
-            // vec![false, false, false, false, false, false, false, false],
-            // vec![true , false, false, true , true , false, false, true ],
-            // vec![false, true , false, false, false, true , false, false],
-        // ],
+    // MOORE_NEIGHBORHOOD.to_vec(),
+    // &[
+    // vec![false, false, false, false, false, false, false, false],
+    // vec![false, false, false, false, false, false, false, false],
+    // vec![true , false, false, true , true , false, false, true ],
+    // vec![false, true , false, false, false, true , false, false],
+    // ],
     // );
     // let start = 0;
 
