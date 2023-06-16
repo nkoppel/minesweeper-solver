@@ -209,3 +209,16 @@ impl fmt::Display for Solver<Game2d> {
         Ok(())
     }
 }
+
+impl<G: InternalGame> fmt::Display for Solver<SafeStartGame<G>>
+where
+    Solver<G>: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        Solver {
+            grid: self.grid.clone(),
+            game: self.game.inner.clone(),
+        }
+        .fmt(f)
+    }
+}

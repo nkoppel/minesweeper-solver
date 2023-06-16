@@ -31,7 +31,13 @@ fn main() {
     // let start = 0;
 
     // for _ in 0..100000 {
-    let game = Game2d::new(16, 30, 99, MOORE_NEIGHBORHOOD.to_vec(), &mut thread_rng());
+    let game = SafeStartGame::new(Game2d::new(
+        16,
+        30,
+        99,
+        MOORE_NEIGHBORHOOD.to_vec(),
+        &mut thread_rng(),
+    ));
     let start = 0;
 
     // println!("{game}");

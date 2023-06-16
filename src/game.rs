@@ -186,3 +186,68 @@ impl fmt::Display for Game2d {
         Ok(())
     }
 }
+
+#[derive(Clone)]
+pub struct SafeStartGame<G: InternalGame> {
+    pub inner: G,
+    started: bool,
+}
+
+impl<G: InternalGame> SafeStartGame<G> {
+    pub fn new(game: G) -> Self {
+        Self {
+            inner: game,
+            started: false,
+        }
+    }
+}
+
+impl<G: InternalGame> Game for SafeStartGame<G> {
+    fn for_each_neighbor(&self, pos: usize, callback: impl FnMut(usize)) {
+        self.inner.for_each_neighbor(pos, callback)
+    }
+
+    fn explore_square(&mut self, pos: usize) -> Option<u8> {
+        if self.started {
+            return self.inner.explore_square(pos);
+        }
+
+        let mut allowed_squares = bitvec![usize, Lsb0; 1; self.num_squares()];
+
+        allowed_squares.set(pos, false);
+        self.for_each_neighbor(pos, |n| {
+            allowed_squares.set(n, false);
+        });
+
+        let allowed_squares: Vec<usize> = allowed_squares.iter_ones().collect();
+        let mut grid = bitvec![usize, Lsb0; 0; self.num_squares()];
+
+        for i in n_unique_random(allowed_squares.len(), self.num_mines(), &mut thread_rng()) {
+            grid.set(allowed_squares[i], true);
+        }
+
+        self.started = true;
+        self.inner.set_grid(grid);
+        Some(0)
+    }
+
+    fn num_squares(&self) -> usize {
+        self.inner.num_squares()
+    }
+
+    fn num_mines(&self) -> usize {
+        self.inner.num_mines()
+    }
+}
+
+impl<G: InternalGame> InternalGame for SafeStartGame<G> {
+    fn set_grid(&mut self, grid: BitVec) {
+        self.inner.set_grid(grid)
+    }
+}
+
+impl<G: InternalGame + fmt::Display> fmt::Display for SafeStartGame<G> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
+    }
+}
