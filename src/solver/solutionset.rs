@@ -248,11 +248,7 @@ impl SolutionSet {
     }
 
     pub fn sample_game(&self, rng: &mut impl Rng) -> BitVec {
-        let mut out: BitVec = self
-            .grid
-            .iter()
-            .map(|c| matches!(c, Mine { .. }))
-            .collect();
+        let mut out: BitVec = self.grid.iter().map(|c| matches!(c, Mine { .. })).collect();
         let sample = self.sample(rng);
 
         for (num_mines, group) in sample.iter().zip(self.groups.iter()) {
@@ -261,11 +257,7 @@ impl SolutionSet {
             }
         }
 
-        let mut unconstrained_tiles = self
-            .grid
-            .iter()
-            .map(|c| *c == Empty)
-            .collect::<BitVec>();
+        let mut unconstrained_tiles = self.grid.iter().map(|c| *c == Empty).collect::<BitVec>();
 
         for tile in self.groups.iter().flatten() {
             unconstrained_tiles.set(*tile, false);

@@ -52,11 +52,7 @@ fn grid_as_mask(grid: &[Tile]) -> Vec<f64> {
 impl SolutionSet {
     fn nn_features(&self) -> Vec<f64> {
         let mut out = self.tile_mine_probabilities();
-        out.extend(
-            self.grid
-                .iter()
-                .map(|&cell| (cell == Empty) as u8 as f64),
-        );
+        out.extend(self.grid.iter().map(|&cell| (cell == Empty) as u8 as f64));
         out.extend((0..self.grid.len()).map(|_| 1.0));
         out.extend(self.grid.iter().map(|&cell| match cell {
             Hint {
