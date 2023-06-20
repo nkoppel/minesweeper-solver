@@ -9,8 +9,8 @@ use itertools::Itertools;
 use rand::prelude::*;
 use smallvec::*;
 
-pub struct SolutionSet<'a, G: Game> {
-    pub(super) solver: &'a Solver<G>,
+pub struct SolutionSet {
+    pub grid: Vec<Tile>,
     pub(super) groups: Vec<Vec<usize>>,
     pub(super) subsolutions: Vec<SubSolutionSet>,
     pub(super) num_solutions_with_num_mines: Vec<HashMap<usize, usize>>,
@@ -57,13 +57,13 @@ fn ubig_ratio_to_float(mut n: UBig, mut d: UBig) -> f64 {
     n.to_f64() / d.to_f64()
 }
 
-impl<'a, G: Game> SolutionSet<'a, G> {
+impl SolutionSet {
     pub fn new(
-        solver: &'a Solver<G>,
+        solver: &Solver<impl Game>,
         groups: Vec<Vec<usize>>,
         subsolutions: Vec<SubSolutionSet>,
     ) -> Self {
-        let remaining_empties = solver.remaining_empty_squares();
+        let remaining_empties = solver.remaining_empty_tiles();
         let remaining_mines = solver.remaining_mines();
 
         let num_solutions_with_num_mines = subsolutions
@@ -100,7 +100,7 @@ impl<'a, G: Game> SolutionSet<'a, G> {
             .collect();
 
         SolutionSet {
-            solver,
+            grid: solver.grid.clone(),
             groups,
             subsolutions,
             num_solutions_with_num_mines,
@@ -184,15 +184,14 @@ impl<'a, G: Game> SolutionSet<'a, G> {
             )
     }
 
-    pub fn square_mine_probabilities(&self) -> Vec<f64> {
+    pub fn tile_mine_probabilities(&self) -> Vec<f64> {
         let unconstrained_prob = self.unconstrained_mine_probability();
         let group_probs = self.group_mine_probabilities();
 
         let mut out = self
-            .solver
             .grid
             .iter()
-            .map(|square| match square {
+            .map(|tile| match tile {
                 Empty => unconstrained_prob,
                 Mine { .. } => 1.0,
                 AssertHint { .. } => 0.0,
@@ -250,7 +249,6 @@ impl<'a, G: Game> SolutionSet<'a, G> {
 
     pub fn sample_game(&self, rng: &mut impl Rng) -> BitVec {
         let mut out: BitVec = self
-            .solver
             .grid
             .iter()
             .map(|c| matches!(c, Mine { .. }))
@@ -263,22 +261,21 @@ impl<'a, G: Game> SolutionSet<'a, G> {
             }
         }
 
-        let mut unconstrained_squares = self
-            .solver
+        let mut unconstrained_tiles = self
             .grid
             .iter()
             .map(|c| *c == Empty)
             .collect::<BitVec>();
 
-        for square in self.groups.iter().flatten() {
-            unconstrained_squares.set(*square, false);
+        for tile in self.groups.iter().flatten() {
+            unconstrained_tiles.set(*tile, false);
         }
 
-        let unconstrained_squares = unconstrained_squares.iter_ones().collect::<Vec<_>>();
+        let unconstrained_tiles = unconstrained_tiles.iter_ones().collect::<Vec<_>>();
         let unconstrained_mines = self.remaining_mines - sum_to_usize(&sample);
 
-        for i in n_unique_random(unconstrained_squares.len(), unconstrained_mines, rng) {
-            out.set(unconstrained_squares[i], true);
+        for i in n_unique_random(unconstrained_tiles.len(), unconstrained_mines, rng) {
+            out.set(unconstrained_tiles[i], true);
         }
 
         out

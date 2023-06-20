@@ -6,10 +6,11 @@ pub use std::collections::{HashSet, VecDeque};
 
 use crate::game::*;
 pub use csp::*;
+pub use solutionset::*;
 pub use solve::*;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Square {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Tile {
     Empty,
     Mine {
         needs_propogate: bool,
@@ -24,15 +25,15 @@ pub enum Square {
     },
 }
 
-pub use Square::*;
+pub use Tile::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Solver<G: Game> {
-    pub grid: Vec<Square>,
+    pub grid: Vec<Tile>,
     pub game: G,
 }
 
-impl Square {
+impl Tile {
     fn needs_flag_fill(&self) -> bool {
         let Hint { remaining_mines, empties, .. } = *self else { return false };
         remaining_mines > 0 && remaining_mines == empties
@@ -62,7 +63,7 @@ impl Square {
     }
 }
 
-pub fn grid_subset_of(subset: &[Square], set: &[Square]) -> bool {
+pub fn is_grid_subset_of(subset: &[Tile], set: &[Tile]) -> bool {
     subset
         .iter()
         .zip(set.iter())
@@ -72,21 +73,21 @@ pub fn grid_subset_of(subset: &[Square], set: &[Square]) -> bool {
 impl<G: Game> Solver<G> {
     pub fn new(game: G) -> Self {
         Self {
-            grid: vec![Empty; game.num_squares()],
+            grid: vec![Empty; game.num_tiles()],
             game,
         }
     }
 
-    pub fn uncover_square(&mut self, square: usize) -> Option<()> {
-        if self.grid[square] != Empty {
+    pub fn uncover_tile(&mut self, tile: usize) -> Option<()> {
+        if self.grid[tile] != Empty {
             return Some(());
         }
 
-        let hint = self.game.explore_square(square)?;
+        let hint = self.game.explore_tile(tile)?;
         let mut mines = 0;
         let mut empties = 0;
 
-        self.game.for_each_neighbor(square, |n| {
+        self.game.for_each_neighbor(tile, |n| {
             match self.grid[n] {
                 Mine { .. } => mines += 1,
                 Empty => empties += 1,
@@ -101,7 +102,7 @@ impl<G: Game> Solver<G> {
             }
         });
 
-        self.grid[square] = Hint {
+        self.grid[tile] = Hint {
             hint,
             remaining_mines: hint - mines,
             empties,
@@ -110,18 +111,18 @@ impl<G: Game> Solver<G> {
         Some(())
     }
 
-    /// Assert that a square is a hint without making any calls to Game::explore_square to discover
-    /// the square's value
-    pub fn assert_square(&mut self, square: usize) {
-        if self.grid[square] != Empty {
+    /// Assert that a tile is a hint without making any calls to Game::explore_tile to discover
+    /// the tile's value
+    pub fn assert_tile(&mut self, tile: usize) {
+        if self.grid[tile] != Empty {
             panic!();
         }
 
-        self.grid[square] = AssertHint {
+        self.grid[tile] = AssertHint {
             needs_propogate: true,
         };
 
-        self.game.for_each_neighbor(square, |n| {
+        self.game.for_each_neighbor(tile, |n| {
             if let Hint {
                 ref mut empties, ..
             } = self.grid[n]
@@ -131,16 +132,41 @@ impl<G: Game> Solver<G> {
         })
     }
 
-    pub fn flag_square(&mut self, square: usize) {
-        if self.grid[square] != Empty {
+    pub fn clear_tile(&mut self, tile: usize) {
+        match self.grid[tile] {
+            Hint { .. } | AssertHint { .. } => self.game.for_each_neighbor(tile, |n| {
+                if let Hint {
+                    ref mut empties, ..
+                } = self.grid[n]
+                {
+                    *empties += 1;
+                }
+            }),
+            Mine { .. } => self.game.for_each_neighbor(tile, |n| {
+                if let Hint {
+                    ref mut remaining_mines,
+                    ref mut empties,
+                    ..
+                } = self.grid[n]
+                {
+                    *remaining_mines += 1;
+                    *empties += 1;
+                }
+            }),
+            Empty => {}
+        }
+    }
+
+    pub fn flag_tile(&mut self, tile: usize) {
+        if self.grid[tile] != Empty {
             return;
         }
 
-        self.grid[square] = Mine {
+        self.grid[tile] = Mine {
             needs_propogate: true,
         };
 
-        self.game.for_each_neighbor(square, |n| {
+        self.game.for_each_neighbor(tile, |n| {
             if let Hint {
                 ref mut remaining_mines,
                 ref mut empties,
@@ -153,30 +179,30 @@ impl<G: Game> Solver<G> {
         })
     }
 
-    pub fn propogate(&mut self, squares: &mut Vec<usize>) {
-        let stack = squares;
+    pub fn propogate(&mut self, tile: &mut Vec<usize>) {
+        let stack = tile;
         let mut neighbors = Vec::with_capacity(8);
 
         while let Some(loc) = stack.last().copied() {
-            let square = &mut self.grid[loc];
+            let tile = &mut self.grid[loc];
 
             neighbors.clear();
             self.game.for_each_neighbor(loc, |n| neighbors.push(n));
 
             if let Mine {
                 ref mut needs_propogate,
-            } = square
+            } = tile
             {
                 *needs_propogate = false;
             }
 
-            if square.needs_flag_fill() {
+            if tile.needs_flag_fill() {
                 for n in &neighbors {
-                    self.flag_square(*n);
+                    self.flag_tile(*n);
                 }
-            } else if square.needs_hint_fill() {
+            } else if tile.needs_hint_fill() {
                 for n in &neighbors {
-                    self.uncover_square(*n).unwrap();
+                    self.uncover_tile(*n).unwrap();
                 }
             }
 
@@ -186,39 +212,5 @@ impl<G: Game> Solver<G> {
                 stack.pop();
             }
         }
-    }
-}
-
-use std::fmt;
-
-impl fmt::Display for Solver<Game2d> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (i, x) in self.grid.iter().enumerate() {
-            match x {
-                Empty => write!(f, ". ")?,
-                Mine { .. } => write!(f, "* ")?,
-                AssertHint { .. } => write!(f, "? ")?,
-                Hint {
-                    remaining_mines, ..
-                } => write!(f, "{remaining_mines} ")?,
-            }
-            if i % self.game.width() == self.game.width() - 1 {
-                writeln!(f)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl<G: InternalGame> fmt::Display for Solver<SafeStartGame<G>>
-where
-    Solver<G>: fmt::Display,
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        Solver {
-            grid: self.grid.clone(),
-            game: self.game.inner.clone(),
-        }
-        .fmt(f)
     }
 }

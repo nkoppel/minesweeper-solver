@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 mod game;
+mod nn;
 mod search;
 mod solver;
 
@@ -31,28 +32,29 @@ fn main() {
     // let start = 0;
 
     // for _ in 0..100000 {
-    let game = SafeStartGame::new(Game2d::new(
-        16,
-        30,
-        99,
-        MOORE_NEIGHBORHOOD.to_vec(),
-        &mut thread_rng(),
-    ));
-    let start = 0;
+    // let game = SafeStartGame::new(Game2d::new(
+    // 16,
+    // 30,
+    // 99,
+    // MOORE_NEIGHBORHOOD.to_vec(),
+    // &mut thread_rng(),
+    // ));
+    // let start = 0;
 
     // println!("{game}");
 
-    let mut solver = Solver::new(game);
-    solver.uncover_square(start);
-    solver.propogate(&mut vec![start]);
+    // let mut solver = Solver::new(game);
+    // solver.uncover_tile(start);
+    // solver.propogate(&mut vec![start]);
 
-    println!("{solver}");
+    // println!("{solver}");
 
-    let sols = solver.solve_csp().unwrap();
+    // let (groups, subsolutions) = solver.solve_csp().unwrap();
+    // let sols = SolutionSet::new(&solver, groups, subsolutions);
 
-    print_probs_2d(&sols.square_mine_probabilities(), 16);
+    // print_probs_2d(&sols.tile_mine_probabilities(), 16);
 
-    println!("{solver}");
+    // println!("{solver}");
     // println!("{sols:?}");
     // println!("{:?}", sols.1.iter().map(|s| s.num_solutions()).collect::<Vec<_>>());
 
