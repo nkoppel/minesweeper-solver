@@ -57,7 +57,7 @@ impl SolutionSet {
         out.extend(self.grid.iter().map(|&cell| match cell {
             Hint {
                 remaining_mines, ..
-            } => remaining_mines as f64 + 1.0,
+            } => remaining_mines as f64,
             _ => 0.0,
         }));
 
@@ -91,14 +91,15 @@ impl TreeNode {
     fn next_search_action(&self) -> usize {
         let total_visits = self.action_visits.iter().sum::<usize>() as f64;
 
+        let ucb = |i| {
+            self.action_values[i]
+                + EXPLORATION_FACTOR * self.policy[i] * total_visits.sqrt()
+                    / (1 + self.action_visits[i]) as f64
+        };
+
         (0..self.policy.len())
             .filter(|i| self.policy[*i] > 0.)
-            .map(|i| {
-                self.action_values[i]
-                    + EXPLORATION_FACTOR * self.policy[i] * total_visits.sqrt()
-                        / (1 + self.action_visits[i]) as f64
-            })
-            .position_max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max_by(|&i, &j| ucb(i).partial_cmp(&ucb(j)).unwrap())
             .unwrap()
     }
 
@@ -125,7 +126,15 @@ impl TreeNode {
     }
 }
 
-impl<E: EvalFunction, G: Graph> Searcher<E, G> {
+impl<E: EvalFunction, G: Graph + Clone> Searcher<E, G> {
+    pub fn new(game: InternalGame<G>, eval: E) -> Self {
+        Self {
+            tree: HashMap::new(),
+            root: Solver::new(game),
+            eval
+        }
+    }
+
     pub fn set_root(&mut self, root: Solver<InternalGame<G>>) {
         self.tree
             .retain(|grid, _| is_grid_subset_of(grid, &root.grid));
@@ -182,7 +191,7 @@ impl<E: EvalFunction, G: Graph> Searcher<E, G> {
         self.tree[&self.root.grid].best_action()
     }
 
-    pub fn training_example(&self) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+    pub fn training_example(&self) -> [Vec<f64>; 4] {
         let node = self.tree.get(&self.root.grid).unwrap();
         let features = self.root.get_solutionset().unwrap().nn_features();
         let mask = grid_as_mask(&self.root.grid);
@@ -201,6 +210,81 @@ impl<E: EvalFunction, G: Graph> Searcher<E, G> {
             .map(|&v| v as f64 / total_visits)
             .collect();
 
-        (features, mask, action_values, policy)
+        [features, mask, action_values, policy]
+    }
+
+    fn play_with_callback(
+        &mut self,
+        game: impl Game<Graph = G>,
+        nodes: usize,
+        mut callback: impl FnMut(&mut Self),
+    ) -> bool {
+        let internal_solver = Solver::new(InternalGame::from_game(
+            StartType::Safe,
+            &game
+        ));
+        let mut solver = Solver::new(game);
+
+        self.set_root(internal_solver);
+
+        loop {
+            for _ in 0..nodes {
+                self.expand()
+            }
+            callback(self);
+
+            let guess = self.best_action();
+
+            if solver.uncover_tile(guess).is_none() {
+                return false;
+            }
+
+            solver.propogate(&mut vec![guess]);
+            solver.solve_csp();
+
+            if solver.remaining_empty_tiles() == 0 {
+                return true;
+            }
+
+            let internal_solver = Solver::new(InternalGame::from_game(
+                StartType::Safe,
+                &solver.game
+            ));
+            self.set_root(internal_solver);
+        }
+    }
+
+    pub fn play(&mut self, game: impl Game<Graph = G>, nodes: usize) -> bool {
+        self.play_with_callback(game, nodes, |_| {})
+    }
+
+    pub fn train(&mut self, games: impl Iterator<Item = impl Game<Graph = G>>, nodes: usize) {
+        use crate::nn::BATCH_SIZE;
+        const TMP: Vec<Vec<f64>> = Vec::new();
+
+        let mut batch: [Vec<Vec<f64>>; 4] = [TMP; 4];
+
+        for game in games {
+            let _ = self.play_with_callback(game, nodes, |searcher| {
+                let example = searcher.training_example();
+
+                for (b, e) in batch.iter_mut().zip(example.into_iter()) {
+                    b.push(e);
+                }
+
+                if batch[0].len() >= BATCH_SIZE {
+                    searcher
+                        .eval
+                        .train_batch(&batch[0], &batch[1], &batch[2], &batch[3]);
+
+                    for b in &mut batch {
+                        b.clear();
+                    }
+                }
+            });
+        }
+
+        self.eval
+            .train_batch(&batch[0], &batch[1], &batch[2], &batch[3]);
     }
 }

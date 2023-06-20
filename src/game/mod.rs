@@ -6,12 +6,12 @@ mod game2d;
 
 pub use game2d::*;
 
-pub trait Graph: Clone {
+pub trait Graph {
     fn for_each_neighbor(&self, pos: usize, callback: impl FnMut(usize));
     fn num_tiles(&self) -> usize;
 }
 
-pub trait Game: Graph {
+pub trait Game {
     type Graph: Graph;
 
     fn graph(&self) -> &Self::Graph;
@@ -69,8 +69,14 @@ impl<G: Graph> InternalGame<G> {
         }
     }
 
+    pub fn from_game(start_type: StartType, game: &impl Game<Graph = G>) -> Self
+        where G: Clone
+    {
+        Self::new(game.num_mines(), start_type, game.graph().clone())
+    }
+
     fn explore_tile_inner(&self, grid: &BitVec, pos: usize) -> Option<u8> {
-        grid[pos].then(|| {
+        (!grid[pos]).then(|| {
             let mut count = 0;
 
             self.for_each_neighbor(pos, |pos2| {

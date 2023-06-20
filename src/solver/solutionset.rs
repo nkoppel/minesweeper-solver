@@ -133,6 +133,10 @@ impl SolutionSet {
     }
 
     fn group_mine_probabilities(&self) -> Vec<f64> {
+        if self.subsolutions.is_empty() {
+            return Vec::new();
+        }
+
         // mapping from subsolution mine count to number of solutions
         let mut total_solutions_with_num_mines: Vec<HashMap<usize, f64>> =
             vec![HashMap::new(); self.subsolutions.len()];
@@ -209,6 +213,10 @@ impl SolutionSet {
     }
 
     fn sample(&self, rng: &mut impl Rng) -> IntVec {
+        if self.subsolutions.is_empty() {
+            return SmallVec::new();
+        }
+
         let solution_num = rng.gen_range(ubig!(0)..self.total_num_solutions.clone());
         let counts_idx = self
             .subsolution_mine_counts

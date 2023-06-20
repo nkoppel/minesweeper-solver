@@ -115,7 +115,7 @@ impl<G: Game> Solver<G> {
     /// the tile's value
     pub fn assert_tile(&mut self, tile: usize) {
         if self.grid[tile] != Empty {
-            panic!();
+            panic!("Attempted to assert a {:?}", self.grid[tile]);
         }
 
         self.grid[tile] = AssertHint {
@@ -155,6 +155,7 @@ impl<G: Game> Solver<G> {
             }),
             Empty => {}
         }
+        self.grid[tile] = Empty;
     }
 
     pub fn flag_tile(&mut self, tile: usize) {

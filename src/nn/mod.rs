@@ -9,31 +9,45 @@ type E = f32;
 type D = Cuda;
 
 const CHANNELS: usize = 4;
+pub(crate) const BATCH_SIZE: usize = 256;
 
 type Conv<const I: usize, const O: usize> = (Conv2D<I, O, 3, 1, 1>, Bias2D<O>, Selu);
 
 type UNetBlock<const C1: usize, const C2: usize, M> =
     Upscale2DResidual<((Conv2D<C1, C2, 3, 2, 1>, Bias2D<C2>, Selu), M, Conv<C2, C1>)>;
 
+// Specialized UNet that uses 1x1 convolutions to emulate a pixel-wise MLP.
+type UNetInternalBlock<const C1: usize, const C2: usize> = Upscale2DResidual<(
+    (Conv2D<C1, C2, 3, 2, 1>, Bias2D<C2>, Selu),
+    (Conv2D<C2, C2, 1, 1, 0>, Bias2D<C2>, Selu),
+    (Conv2D<C2, C1, 1, 1, 0>, Bias2D<C1>, Selu),
+)>;
+
 type BeginnerNet = (
     Conv<CHANNELS, 16>,
     Residual<(
         Residual<Repeated<Conv<16, 16>, 4>>,
-        UNetBlock<16, 32, UNetBlock<32, 64, UNetBlock<64, 128, Conv<128, 128>>>>,
+        UNetBlock<16, 32, UNetBlock<32, 64, UNetInternalBlock<64, 128>>>,
         Residual<Repeated<Conv<16, 16>, 4>>,
     )>,
     SplitInto<(Conv2D<16, 1, 3, 1, 1>, Conv2D<16, 1, 3, 1, 1>)>,
+);
+
+type BeginnerNet2 = (
+    Conv<CHANNELS, 32>,
+    Residual<(
+        Residual<Repeated<Conv<32, 32>, 4>>,
+        UNetBlock<32, 64, UNetBlock<64, 128, UNetInternalBlock<128, 256>>>,
+        Residual<Repeated<Conv<32, 32>, 4>>,
+    )>,
+    SplitInto<(Conv2D<32, 1, 3, 1, 1>, Conv2D<32, 1, 3, 1, 1>)>,
 );
 
 type ExpertNet = (
     Conv<CHANNELS, 16>,
     Residual<(
         Residual<Repeated<Conv<16, 16>, 4>>,
-        UNetBlock<
-            16,
-            32,
-            UNetBlock<32, 64, UNetBlock<64, 128, UNetBlock<128, 256, Conv<256, 256>>>>,
-        >,
+        UNetBlock<16, 32, UNetBlock<32, 64, UNetBlock<64, 128, UNetInternalBlock<128, 256>>>>,
         Residual<Repeated<Conv<16, 16>, 4>>,
     )>,
     SplitInto<(Conv2D<16, 1, 3, 1, 1>, Conv2D<16, 1, 3, 1, 1>)>,
@@ -148,4 +162,10 @@ impl EvalFunction for DummyEvalFunction {
         _policies: &[impl Deref<Target = [f64]>],
     ) {
     }
+}
+
+pub fn test() {
+    let dev = Cuda::default();
+    let nn = dev.build_module::<Net, f32>();
+    println!("{}", nn.num_trainable_params());
 }

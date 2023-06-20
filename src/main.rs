@@ -6,8 +6,9 @@ mod search;
 mod solver;
 
 pub use crate::game::*;
+pub use crate::nn::*;
 pub use crate::solver::*;
-use rand::prelude::*;
+pub use crate::search::*;
 
 fn print_probs_2d(probs: &[f64], width: usize) {
     for (i, prob) in probs.iter().enumerate() {
@@ -20,44 +21,13 @@ fn print_probs_2d(probs: &[f64], width: usize) {
 }
 
 fn main() {
-    // let game = Game2d::from_2d_grid(
-    // MOORE_NEIGHBORHOOD.to_vec(),
-    // &[
-    // vec![false, false, false, false, false, false, false, false],
-    // vec![false, false, false, false, false, false, false, false],
-    // vec![true , false, false, true , true , false, false, true ],
-    // vec![false, true , false, false, false, true , false, false],
-    // ],
-    // );
-    // let start = 0;
+    // test();
 
-    // for _ in 0..100000 {
-    // let game = SafeStartGame::new(Game2d::new(
-    // 16,
-    // 30,
-    // 99,
-    // MOORE_NEIGHBORHOOD.to_vec(),
-    // &mut thread_rng(),
-    // ));
-    // let start = 0;
+    let game = InternalGame::new(10, StartType::Safe, Graph2d::new(9, 9, &MOORE_NEIGHBORHOOD));
+    let eval = DummyEvalFunction;
+    let mut searcher = Searcher::new(game, eval);
 
-    // println!("{game}");
+    for _ in 0..100000 { searcher.expand(); }
 
-    // let mut solver = Solver::new(game);
-    // solver.uncover_tile(start);
-    // solver.propogate(&mut vec![start]);
-
-    // println!("{solver}");
-
-    // let (groups, subsolutions) = solver.solve_csp().unwrap();
-    // let sols = SolutionSet::new(&solver, groups, subsolutions);
-
-    // print_probs_2d(&sols.tile_mine_probabilities(), 16);
-
-    // println!("{solver}");
-    // println!("{sols:?}");
-    // println!("{:?}", sols.1.iter().map(|s| s.num_solutions()).collect::<Vec<_>>());
-
-    // println!("{solver}");
-    // }
+    println!("{}", searcher.best_action());
 }

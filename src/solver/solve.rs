@@ -138,7 +138,7 @@ impl<G: Game> Solver<G> {
         loop {
             let (groups, mut subsolutions) = self.extract_constraints();
 
-            if subsolutions.is_empty() {
+            if self.remaining_empty_tiles() == 0 {
                 return None;
             }
 
@@ -172,11 +172,11 @@ impl<G: Game> Solver<G> {
     }
 
     pub fn get_solutionset(&self) -> Option<SolutionSet> {
-        let (groups, mut subsolutions) = self.extract_constraints();
-
-        if subsolutions.is_empty() {
+        if self.remaining_empty_tiles() == 0 {
             return None;
         }
+
+        let (groups, mut subsolutions) = self.extract_constraints();
 
         merge_all_subsolutions(&mut subsolutions);
 

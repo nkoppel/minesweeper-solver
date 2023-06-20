@@ -274,7 +274,9 @@ pub fn merge_all_subsolutions(sols: &mut Vec<SubSolutionSet>) {
 }
 
 pub fn solved_groups(subsolutions: &[SubSolutionSet]) -> (BitVec, BitVec) {
-    let num_vars = subsolutions[0].num_variables();
+    let Some(num_vars) = subsolutions.get(0).map(|s| s.num_variables()) else {
+        return (BitVec::new(), BitVec::new());
+    };
 
     let mut all_hints = bitvec![usize, Lsb0; 0; num_vars];
     let mut all_mines = bitvec![usize, Lsb0; 0; num_vars];
