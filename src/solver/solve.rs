@@ -132,7 +132,7 @@ impl<G: Game> Solver<G> {
         self.grid.iter().filter(|s| matches!(s, Empty)).count()
     }
 
-    pub fn solve_csp(&mut self) -> Option<(Vec<Vec<usize>>, Vec<SubSolutionSet>)> {
+    pub fn solve_csp(&mut self) -> Option<SolutionSet> {
         let mut tiles = Vec::new();
 
         loop {
@@ -163,11 +163,27 @@ impl<G: Game> Solver<G> {
                 }
             }
 
-            if tiles.is_empty() {
-                return Some((groups, subsolutions));
+            if !tiles.is_empty() {
+                self.propogate(&mut tiles);
+                continue;
+            }
+            let solutionset = SolutionSet::new(self, groups, subsolutions);
+            let mine_probs = solutionset.tile_mine_probabilities();
+
+            for (tile, prob) in mine_probs.iter().enumerate() {
+                if *prob == 0. && self.grid[tile] == Empty {
+                    tiles.push(tile);
+                    self.uncover_tile(tile)
+                        .unwrap_or_else(|| panic!("Attempted to uncover mine at {tile:?}!"));
+                }
             }
 
-            self.propogate(&mut tiles);
+            if !tiles.is_empty() {
+                self.propogate(&mut tiles);
+                continue;
+            }
+
+            return Some(solutionset);
         }
     }
 

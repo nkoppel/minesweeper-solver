@@ -118,6 +118,9 @@ impl TreeNode {
     }
 
     fn value(&self) -> f64 {
+        if self.action_values[0].is_nan() {
+            panic!("nan");
+        }
         self.action_values
             .iter()
             .copied()
@@ -126,16 +129,17 @@ impl TreeNode {
     }
 }
 
-impl<E: EvalFunction, G: Graph + Clone> Searcher<E, G> {
-    pub fn new(game: InternalGame<G>, eval: E) -> Self {
+// TODO: Make this generic to all 'Graph's again
+impl<E: EvalFunction> Searcher<E, Graph2d> {
+    pub fn new(root: Solver<InternalGame<Graph2d>>, eval: E) -> Self {
         Self {
             tree: HashMap::new(),
-            root: Solver::new(game),
-            eval
+            root,
+            eval,
         }
     }
 
-    pub fn set_root(&mut self, root: Solver<InternalGame<G>>) {
+    pub fn set_root(&mut self, root: Solver<InternalGame<Graph2d>>) {
         self.tree
             .retain(|grid, _| is_grid_subset_of(grid, &root.grid));
         self.root = root;
@@ -143,15 +147,14 @@ impl<E: EvalFunction, G: Graph + Clone> Searcher<E, G> {
 
     pub fn expand(&mut self) {
         let mut rng = rand::thread_rng();
-        let mut stack: Vec<(Solver<InternalGame<G>>, usize)> = Vec::new();
+        let mut stack: Vec<(Solver<InternalGame<Graph2d>>, usize)> = Vec::new();
         let mut solver = self.root.clone();
 
         let sols = loop {
-            let constraints = solver.solve_csp();
+            let solutionset = solver.solve_csp();
 
             let Some(node) = self.tree.get(&solver.grid) else {
-                break constraints
-                    .map(|(groups, subsolutions)| SolutionSet::new(&solver, groups, subsolutions));
+                break solutionset;
             };
             let action = node.next_search_action();
 
@@ -201,6 +204,7 @@ impl<E: EvalFunction, G: Graph + Clone> Searcher<E, G> {
             .iter()
             .zip(node.mine_prob.iter())
             .map(|(&val, &prob)| val / (1. - prob))
+            .map(|f| if f.is_nan() { 0. } else { f })
             .collect();
 
         let total_visits = node.action_visits.iter().sum::<usize>() as f64;
@@ -215,14 +219,11 @@ impl<E: EvalFunction, G: Graph + Clone> Searcher<E, G> {
 
     fn play_with_callback(
         &mut self,
-        game: impl Game<Graph = G>,
+        game: impl Game<Graph = Graph2d>,
         nodes: usize,
         mut callback: impl FnMut(&mut Self),
     ) -> bool {
-        let internal_solver = Solver::new(InternalGame::from_game(
-            StartType::Safe,
-            &game
-        ));
+        let internal_solver = Solver::new(InternalGame::from_game(StartType::Safe, &game));
         let mut solver = Solver::new(game);
 
         self.set_root(internal_solver);
@@ -246,26 +247,27 @@ impl<E: EvalFunction, G: Graph + Clone> Searcher<E, G> {
                 return true;
             }
 
-            let internal_solver = Solver::new(InternalGame::from_game(
-                StartType::Safe,
-                &solver.game
-            ));
+            let mut internal_solver =
+                Solver::new(InternalGame::from_game(StartType::Safe, &solver.game));
+            internal_solver.grid = solver.grid.clone();
             self.set_root(internal_solver);
         }
     }
 
-    pub fn play(&mut self, game: impl Game<Graph = G>, nodes: usize) -> bool {
+    pub fn play(&mut self, game: impl Game<Graph = Graph2d>, nodes: usize) -> bool {
         self.play_with_callback(game, nodes, |_| {})
     }
 
-    pub fn train(&mut self, games: impl Iterator<Item = impl Game<Graph = G>>, nodes: usize) {
+    pub fn train(&mut self, games: impl Iterator<Item = impl Game<Graph = Graph2d>>, nodes: usize) {
         use crate::nn::BATCH_SIZE;
         const TMP: Vec<Vec<f64>> = Vec::new();
 
         let mut batch: [Vec<Vec<f64>>; 4] = [TMP; 4];
+        let mut wins = 0;
+        const INTERVAL: usize = 1000;
 
-        for game in games {
-            let _ = self.play_with_callback(game, nodes, |searcher| {
+        for (i, game) in games.enumerate() {
+            let won = self.play_with_callback(game, nodes, |searcher| {
                 let example = searcher.training_example();
 
                 for (b, e) in batch.iter_mut().zip(example.into_iter()) {
@@ -282,6 +284,13 @@ impl<E: EvalFunction, G: Graph + Clone> Searcher<E, G> {
                     }
                 }
             });
+
+            wins += won as usize;
+
+            if i % INTERVAL == INTERVAL - 1 {
+                println!("win rate: {:.3}", wins as f64 / INTERVAL as f64);
+                wins = 0;
+            }
         }
 
         self.eval

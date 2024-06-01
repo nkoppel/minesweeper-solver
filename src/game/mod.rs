@@ -70,7 +70,8 @@ impl<G: Graph> InternalGame<G> {
     }
 
     pub fn from_game(start_type: StartType, game: &impl Game<Graph = G>) -> Self
-        where G: Clone
+    where
+        G: Clone,
     {
         Self::new(game.num_mines(), start_type, game.graph().clone())
     }

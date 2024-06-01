@@ -9,6 +9,7 @@ use itertools::Itertools;
 use rand::prelude::*;
 use smallvec::*;
 
+#[derive(Clone, Debug)]
 pub struct SolutionSet {
     pub grid: Vec<Tile>,
     pub(super) groups: Vec<Vec<usize>>,
@@ -86,6 +87,10 @@ impl SolutionSet {
                 let constrainted_mines = counts.iter().map(|c| c.0).sum::<usize>();
                 let unconstrainted_mines = remaining_mines.checked_sub(constrainted_mines)?;
 
+                if unconstrainted_mines > unconstrained_empties {
+                    return None;
+                }
+
                 let n_solutions = n_choose_k(unconstrained_empties, unconstrainted_mines)
                     * counts
                         .iter()
@@ -112,6 +117,10 @@ impl SolutionSet {
     }
 
     fn unconstrained_mine_probability(&self) -> f64 {
+        if self.subsolution_mine_counts.is_empty() {
+            return self.remaining_mines as f64 / self.remaining_empties as f64;
+        }
+
         let constrained_empties = self
             .subsolutions
             .iter()
