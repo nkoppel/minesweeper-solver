@@ -1,299 +1,254 @@
 use std::collections::HashMap;
 
+use ibig::{ubig, UBig};
 use itertools::Itertools;
 
 use crate::game::*;
 use crate::solver::*;
 
-const EXPLORATION_FACTOR: f64 = 1.5;
-
 struct TreeNode {
-    policy: Vec<f64>,
-    mine_prob: Vec<f64>,
-    action_visits: Vec<usize>,
-    action_values: Vec<f64>,
+    tile_win_count: Vec<UBig>,
+    tile_visit_count: Vec<usize>,
+    child_win_counts: Vec<HashMap<Vec<Tile>, UBig>>,
+    total_solution_count: UBig,
 }
 
-pub struct Searcher<E: EvalFunction, G: Graph> {
-    tree: HashMap<Vec<Tile>, TreeNode>,
-    root: Solver<InternalGame<G>>,
-    eval: E,
-}
-
-use std::ops::Deref;
-
-pub trait EvalFunction {
-    /// Yields q values and policies
-    fn eval_batch(
-        &self,
-        features: &[impl Deref<Target = [f64]>],
-        masks: &[impl Deref<Target = [f64]>],
-    ) -> (Vec<Vec<f64>>, Vec<Vec<f64>>);
-
-    fn train_batch(
-        &mut self,
-        features: &[impl Deref<Target = [f64]>],
-        masks: &[impl Deref<Target = [f64]>],
-        values: &[impl Deref<Target = [f64]>],
-        policies: &[impl Deref<Target = [f64]>],
-    );
-
-    /// Yields q values and a policy
-    fn eval(&self, features: &[f64], mask: &[f64]) -> (Vec<f64>, Vec<f64>) {
-        let (mut v, mut p) = self.eval_batch(&[features], &[mask]);
-        (v.swap_remove(0), p.swap_remove(0))
-    }
-}
-
-fn grid_as_mask(grid: &[Tile]) -> Vec<f64> {
-    grid.iter().map(|&t| (t == Empty) as u8 as f64).collect()
-}
-
-impl SolutionSet {
-    fn nn_features(&self) -> Vec<f64> {
-        let mut out = self.tile_mine_probabilities();
-        out.extend(self.grid.iter().map(|&cell| (cell == Empty) as u8 as f64));
-        out.extend((0..self.grid.len()).map(|_| 1.0));
-        out.extend(self.grid.iter().map(|&cell| match cell {
-            Hint {
-                remaining_mines, ..
-            } => remaining_mines as f64,
-            _ => 0.0,
-        }));
-
-        assert_eq!(out.len(), self.grid.len() * 4);
-
-        out
-    }
-
-    fn make_treenode(&self, eval: &impl EvalFunction) -> TreeNode {
-        let num_tiles = self.grid.len();
-
-        let features = self.nn_features();
-        let mine_prob = features[..num_tiles].to_vec();
-        let mask: Vec<f64> = grid_as_mask(&self.grid);
-        let (mut action_values, policy) = eval.eval(&features, &mask);
-
-        for (val, prob) in action_values.iter_mut().zip(mine_prob.iter()) {
-            *val *= 1. - *prob;
-        }
-
-        TreeNode {
-            policy,
-            mine_prob,
-            action_visits: mask.into_iter().map(|x| x as usize).collect(),
-            action_values,
-        }
-    }
+pub struct Tree<G: Graph> {
+    nodes: HashMap<Vec<Tile>, TreeNode>,
+    root: Board<G>,
 }
 
 impl TreeNode {
-    fn next_search_action(&self) -> usize {
-        let total_visits = self.action_visits.iter().sum::<usize>() as f64;
-
-        let ucb = |i| {
-            self.action_values[i]
-                + EXPLORATION_FACTOR * self.policy[i] * total_visits.sqrt()
-                    / (1 + self.action_visits[i]) as f64
-        };
-
-        (0..self.policy.len())
-            .filter(|i| self.policy[*i] > 0.)
-            .max_by(|&i, &j| ucb(i).partial_cmp(&ucb(j)).unwrap())
-            .unwrap()
+    pub fn new(board: &Board<impl Graph>) -> Self {
+        Self::new_with_solution_set(board, &board.get_solutionset())
     }
 
-    fn best_action(&self) -> usize {
-        self.action_visits.iter().position_max().unwrap()
-    }
-
-    fn update(&mut self, action: usize, mut value: f64) {
-        self.action_visits[action] += 1;
-        value *= 1. - self.mine_prob[action];
-
-        let visits = self.action_visits[action] as f64;
-        let action_value = &mut self.action_values[action];
-
-        *action_value = (*action_value * (visits - 1.) + value) / visits;
-    }
-
-    fn value(&self) -> f64 {
-        if self.action_values[0].is_nan() {
-            panic!("nan");
+    pub fn new_with_solution_set(board: &Board<impl Graph>, solution_set: &SolutionSet) -> Self {
+        Self {
+            tile_win_count: solution_set.tile_safe_counts(),
+            tile_visit_count: vec![0; board.num_tiles()],
+            child_win_counts: vec![HashMap::new(); board.num_tiles()],
+            total_solution_count: solution_set.total_solution_count(),
         }
-        self.action_values
+    }
+}
+
+impl<G: Graph> Tree<G> {
+    pub fn new(root: Board<G>) -> Self {
+        Self {
+            nodes: HashMap::new(),
+            root,
+        }
+    }
+
+    pub fn set_root(&mut self, root: Board<G>) {
+        self.root = root;
+
+        self.nodes
+            .retain(|k, _| is_grid_subset_of(k, &self.root.grid))
+    }
+
+    #[allow(clippy::assigning_clones)]
+    pub fn expand(&mut self) {
+        let mut rng = rand::thread_rng();
+
+        let mut stack: Vec<Board<G>> = Vec::new();
+        let mut board = self.root.clone();
+        let mut solution_set: Option<SolutionSet> = None;
+
+        while let Some(node) = self.nodes.get(&board.grid) {
+            let best_tile = node.tile_win_count.iter().position_max().unwrap();
+
+            if board.grid[best_tile] != Empty {
+                return;
+            }
+            board.assert_tile(best_tile);
+            let sample = board.get_solutionset().sample_game(&mut rng);
+            board.clear_tile(best_tile);
+
+            let mut board2 = board.clone();
+            let mut game = InternalGame::from_grid(sample, board.graph.clone());
+            let mut solver = Solver::new(&mut board2, &mut game);
+
+            solver.uncover_tile(best_tile).unwrap();
+            solver.propogate(&mut vec![best_tile]);
+            solution_set = Some(solver.solve_csp());
+
+            stack.push(board);
+            board = board2;
+        }
+
+        let solution_set = solution_set.unwrap_or_else(|| board.get_solutionset());
+        let node = TreeNode::new_with_solution_set(&board, &solution_set);
+
+        let mut win_count = node
+            .tile_win_count
             .iter()
-            .copied()
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .max()
+            .unwrap()
+            .clone()
+            .max(ubig!(1));
+        let mut total_solution_count = node.total_solution_count.clone();
+
+        self.nodes.insert(board.grid.clone(), node);
+        stack.push(board);
+
+        for boards in stack.windows(2).rev() {
+            let board1 = &boards[0];
+            let board2 = &boards[1];
+
+            let node = self.nodes.get_mut(&board1.grid).unwrap();
+            let best_tile = node.tile_win_count.iter().position_max().unwrap();
+
+            node.tile_visit_count[best_tile] += 1;
+            let prev_win_count = node.child_win_counts[best_tile]
+                .entry(board2.grid.clone())
+                .or_insert_with(|| total_solution_count.clone());
+            node.tile_win_count[best_tile] -= &*prev_win_count - win_count.clone();
+            *prev_win_count = win_count;
+
+            win_count = node.tile_win_count.iter().max().unwrap().clone();
+            total_solution_count.clone_from(&node.total_solution_count);
+        }
+    }
+
+    pub fn best_guess(&self) -> usize {
+        let node = &self.nodes[&self.root.grid];
+        println!("{:?}", node.tile_win_count);
+        println!("{:?}", node.tile_win_count.iter().position_max());
+        println!("{:?}", node.tile_visit_count);
+        self.nodes[&self.root.grid]
+            .tile_visit_count
+            .iter()
+            .position_max()
             .unwrap()
     }
 }
 
-// TODO: Make this generic to all 'Graph's again
-impl<E: EvalFunction> Searcher<E, Graph2d> {
-    pub fn new(root: Solver<InternalGame<Graph2d>>, eval: E) -> Self {
+const EXPLORATION_FACTOR: f64 = 1.0;
+
+struct MCTSNode {
+    tile_visit_count: Vec<usize>,
+    tile_win_count: Vec<f64>,
+    tile_safe_probability: Vec<f64>,
+}
+
+pub struct MCTSTree<G: Graph> {
+    nodes: HashMap<Vec<Tile>, MCTSNode>,
+    root: Board<G>,
+}
+
+impl MCTSNode {
+    fn new(board: &Board<impl Graph>) -> Self {
+        Self::new_with_solution_set(board, &board.get_solutionset())
+    }
+
+    fn new_with_solution_set(board: &Board<impl Graph>, solution_set: &SolutionSet) -> Self {
         Self {
-            tree: HashMap::new(),
-            root,
-            eval,
+            tile_visit_count: vec![0; board.num_tiles()],
+            tile_win_count: vec![0.; board.num_tiles()],
+            tile_safe_probability: solution_set.tile_safe_probabilities(),
         }
     }
 
-    pub fn set_root(&mut self, root: Solver<InternalGame<Graph2d>>) {
-        self.tree
-            .retain(|grid, _| is_grid_subset_of(grid, &root.grid));
+    fn next_search(&self) -> Option<usize> {
+        let total_visits = self.tile_visit_count.iter().sum::<usize>().max(1);
+        let ln_total_visits = (total_visits as f64).ln();
+
+        self.tile_visit_count
+            .iter()
+            .zip(&self.tile_win_count)
+            .zip(&self.tile_safe_probability)
+            .map(|((&visit_count, &win_count), &safe_probability)| {
+                if safe_probability == 0. {
+                    return 0.;
+                }
+
+                let win_prob = if visit_count > 0 {
+                    win_count / visit_count as f64
+                } else {
+                    safe_probability
+                };
+
+                let exploration = (ln_total_visits / (visit_count as f64 + 1.)).sqrt();
+                win_prob + EXPLORATION_FACTOR * exploration
+            })
+            .position_max_by(|a, b| a.partial_cmp(b).unwrap())
+    }
+
+    fn update(&mut self, action: usize, win_prob: f64) -> f64 {
+        self.tile_visit_count[action] += 1;
+        self.tile_win_count[action] += win_prob;
+
+        self.tile_safe_probability[action] * win_prob
+    }
+}
+
+impl<G: Graph> MCTSTree<G> {
+    pub fn new(root: Board<G>) -> Self {
+        Self {
+            nodes: HashMap::new(),
+            root,
+        }
+    }
+
+    pub fn set_root(&mut self, root: Board<G>) {
         self.root = root;
+    }
+
+    pub fn prune(&mut self) {
+        self.nodes
+            .retain(|k, _| is_grid_subset_of(k, &self.root.grid))
     }
 
     pub fn expand(&mut self) {
         let mut rng = rand::thread_rng();
-        let mut stack: Vec<(Solver<InternalGame<Graph2d>>, usize)> = Vec::new();
-        let mut solver = self.root.clone();
 
-        let sols = loop {
-            let solutionset = solver.solve_csp();
+        let mut stack: Vec<(Board<G>, usize)> = Vec::new();
+        let mut board = self.root.clone();
 
-            let Some(node) = self.tree.get(&solver.grid) else {
-                break solutionset;
-            };
-            let action = node.next_search_action();
+        while !board.is_solved() {
+            let node = self
+                .nodes
+                .entry(board.grid.clone())
+                .or_insert_with(|| MCTSNode::new(&board));
+            let next_search = node.next_search().unwrap();
 
-            let mut solver2 = solver.clone();
-            solver2.assert_tile(action);
-            let Some(sols) = solver2.get_solutionset() else {
-                break None;
-            };
-            let grid = sols.sample_game(&mut rng);
+            let mut board2 = board.clone();
 
-            solver.game.grid = Some(grid);
-            solver.uncover_tile(action).unwrap();
-            solver.propogate(&mut vec![action]);
+            board2.assert_tile(next_search);
+            let mut game = InternalGame::from_grid(
+                board2.get_solutionset().sample_game(&mut rng),
+                board.graph.clone(),
+            );
+            board2.clear_tile(next_search);
 
-            solver2.clear_tile(action);
-            stack.push((solver2, action));
-        };
+            let mut solver = Solver::new(&mut board2, &mut game);
 
-        let mut value = match sols {
-            Some(sols) => {
-                let node = sols.make_treenode(&self.eval);
-                let value = node.value();
-                self.tree.insert(solver.grid, node);
-                value
-            }
-            None => 1.0,
-        };
-
-        for (solver, action) in stack.into_iter().rev() {
-            let node = self.tree.get_mut(&solver.grid).unwrap();
-            node.update(action, value);
-            value = node.value();
-        }
-    }
-
-    pub fn best_action(&self) -> usize {
-        self.tree[&self.root.grid].best_action()
-    }
-
-    pub fn training_example(&self) -> [Vec<f64>; 4] {
-        let node = self.tree.get(&self.root.grid).unwrap();
-        let features = self.root.get_solutionset().unwrap().nn_features();
-        let mask = grid_as_mask(&self.root.grid);
-
-        let action_values = node
-            .action_values
-            .iter()
-            .zip(node.mine_prob.iter())
-            .map(|(&val, &prob)| val / (1. - prob))
-            .map(|f| if f.is_nan() { 0. } else { f })
-            .collect();
-
-        let total_visits = node.action_visits.iter().sum::<usize>() as f64;
-        let policy = node
-            .action_visits
-            .iter()
-            .map(|&v| v as f64 / total_visits)
-            .collect();
-
-        [features, mask, action_values, policy]
-    }
-
-    fn play_with_callback(
-        &mut self,
-        game: impl Game<Graph = Graph2d>,
-        nodes: usize,
-        mut callback: impl FnMut(&mut Self),
-    ) -> bool {
-        let internal_solver = Solver::new(InternalGame::from_game(StartType::Safe, &game));
-        let mut solver = Solver::new(game);
-
-        self.set_root(internal_solver);
-
-        loop {
-            for _ in 0..nodes {
-                self.expand()
-            }
-            callback(self);
-
-            let guess = self.best_action();
-
-            if solver.uncover_tile(guess).is_none() {
-                return false;
-            }
-
-            solver.propogate(&mut vec![guess]);
+            solver.uncover_tile(next_search).unwrap();
+            solver.propogate(&mut vec![next_search]);
             solver.solve_csp();
 
-            if solver.remaining_empty_tiles() == 0 {
-                return true;
-            }
+            stack.push((board, next_search));
+            board = board2;
+        }
 
-            let mut internal_solver =
-                Solver::new(InternalGame::from_game(StartType::Safe, &solver.game));
-            internal_solver.grid = solver.grid.clone();
-            self.set_root(internal_solver);
+        let mut win_prob = 1.;
+
+        for (board, action) in stack.into_iter().rev() {
+            let node = self.nodes.get_mut(&board.grid).unwrap();
+            win_prob = node.update(action, win_prob);
         }
     }
 
-    pub fn play(&mut self, game: impl Game<Graph = Graph2d>, nodes: usize) -> bool {
-        self.play_with_callback(game, nodes, |_| {})
-    }
-
-    pub fn train(&mut self, games: impl Iterator<Item = impl Game<Graph = Graph2d>>, nodes: usize) {
-        use crate::nn::BATCH_SIZE;
-        const TMP: Vec<Vec<f64>> = Vec::new();
-
-        let mut batch: [Vec<Vec<f64>>; 4] = [TMP; 4];
-        let mut wins = 0;
-        const INTERVAL: usize = 1000;
-
-        for (i, game) in games.enumerate() {
-            let won = self.play_with_callback(game, nodes, |searcher| {
-                let example = searcher.training_example();
-
-                for (b, e) in batch.iter_mut().zip(example.into_iter()) {
-                    b.push(e);
-                }
-
-                if batch[0].len() >= BATCH_SIZE {
-                    searcher
-                        .eval
-                        .train_batch(&batch[0], &batch[1], &batch[2], &batch[3]);
-
-                    for b in &mut batch {
-                        b.clear();
-                    }
-                }
-            });
-
-            wins += won as usize;
-
-            if i % INTERVAL == INTERVAL - 1 {
-                println!("win rate: {:.3}", wins as f64 / INTERVAL as f64);
-                wins = 0;
-            }
-        }
-
-        self.eval
-            .train_batch(&batch[0], &batch[1], &batch[2], &batch[3]);
+    pub fn best_guess(&self) -> usize {
+        let node = &self.nodes[&self.root.grid];
+        println!("{:?}", node.tile_win_count);
+        println!("{:?}", node.tile_visit_count);
+        return self.nodes[&self.root.grid]
+            .tile_visit_count
+            .iter()
+            .position_max()
+            .unwrap();
     }
 }

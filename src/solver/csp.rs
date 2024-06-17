@@ -1,9 +1,8 @@
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 pub use bitvec::prelude::*;
 use smallvec::*;
 
-pub type MaskVec = SmallVec<[bool; 64]>;
 pub type IntVec = SmallVec<[u8; 64]>;
 
 fn n_choose_k(n: usize, k1: usize) -> usize {
@@ -120,6 +119,13 @@ pub(super) fn equal_on_intersection(intersection: &[u8], a: &[u8], b: &[u8]) -> 
         .all(|(i, (a, b))| *i == 0 || *a == *b)
 }
 
+fn compare_on_intersection(intersection: &[u8], a: &[u8], b: &[u8]) -> Ordering {
+    let a_iter = a.iter().zip(intersection).map(|(s, i)| s.min(i));
+    let b_iter = b.iter().zip(intersection).map(|(s, i)| s.min(i));
+
+    a_iter.cmp(b_iter)
+}
+
 impl SubSolutionSet {
     pub fn from_constraint(mask: IntVec, count: usize) -> Self {
         let solutions = CombinationsIter::new(mask.clone(), count).collect::<Vec<_>>();
@@ -192,11 +198,23 @@ impl SubSolutionSet {
     }
 
     fn proven_on_intersection(&self, intersection: &[u8]) -> bool {
-        let Some(first) = self.solutions.get(0) else { return true };
+        let Some(first) = self.solutions.first() else {
+            return true;
+        };
 
         self.solutions[1..]
             .iter()
             .all(|sol| equal_on_intersection(intersection, first, sol))
+    }
+
+    fn group_on_mask<'a>(
+        &'a mut self,
+        mask: &'a [u8],
+    ) -> impl Iterator<Item = &[SmallVec<[u8; 64]>]> + 'a {
+        self.solutions
+            .sort_unstable_by(|a, b| compare_on_intersection(mask, a, b));
+        self.solutions
+            .chunk_by(|a, b| equal_on_intersection(mask, a, b))
     }
 
     pub fn try_merge(&mut self, mut other: Self) -> Result<(), Self> {
@@ -211,7 +229,7 @@ impl SubSolutionSet {
                 std::mem::swap(self, &mut other);
             }
 
-            if let Some(first) = other.solutions.get(0) {
+            if let Some(first) = other.solutions.first() {
                 self.solutions
                     .retain(|sol| equal_on_intersection(&intersection, first, sol));
             }
@@ -227,7 +245,42 @@ impl SubSolutionSet {
 
         let mut solutions = Vec::new();
 
-        // TODO: It may be possible to make this faster with a HashMap
+        // Alternative way to merge groups that should be faster in theory but ends up being
+        // slower in practice. Keeping this around for the sake of it.
+
+        // let mut groups1 = self.group_on_mask(&intersection).peekable();
+        // let mut groups2 = other.group_on_mask(&intersection).peekable();
+
+        // loop {
+        // let (Some(&group1), Some(&group2)) = (groups1.peek(), groups2.peek()) else {
+        // break;
+        // };
+
+        // match compare_on_intersection(&intersection, &group1[0], &group2[0]) {
+        // Ordering::Less => {
+        // groups1.next();
+        // continue;
+        // },
+        // Ordering::Greater => {
+        // groups2.next();
+        // continue;
+        // },
+        // Ordering::Equal => {},
+        // }
+
+        // for sol1 in group1 {
+        // for sol2 in group2 {
+        // solutions.push(intvec_or(sol1, sol2));
+        // }
+        // }
+
+        // groups1.next();
+        // groups2.next();
+        // }
+
+        // std::mem::drop(groups1);
+        // std::mem::drop(groups2);
+
         for sol1 in &self.solutions {
             for sol2 in &other.solutions {
                 if equal_on_intersection(&intersection, sol1, sol2) {
@@ -274,7 +327,7 @@ pub fn merge_all_subsolutions(sols: &mut Vec<SubSolutionSet>) {
 }
 
 pub fn solved_groups(subsolutions: &[SubSolutionSet]) -> (BitVec, BitVec) {
-    let Some(num_vars) = subsolutions.get(0).map(|s| s.num_variables()) else {
+    let Some(num_vars) = subsolutions.first().map(|s| s.num_variables()) else {
         return (BitVec::new(), BitVec::new());
     };
 

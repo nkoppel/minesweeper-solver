@@ -40,7 +40,7 @@ fn valid_neighbors_2d(
     })
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Graph2d {
     width: usize,
     height: usize,
@@ -74,7 +74,9 @@ impl Graph for Graph2d {
 
 impl fmt::Display for InternalGame<Graph2d> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Some(grid) = self.grid.as_ref() else { return write!(f, "None"); };
+        let Some(grid) = self.grid.as_ref() else {
+            return write!(f, "None");
+        };
 
         for (i, c) in grid.iter().enumerate() {
             if *c {
@@ -93,7 +95,7 @@ impl fmt::Display for InternalGame<Graph2d> {
 
 use crate::solver::*;
 
-impl<G: Game<Graph = Graph2d>> fmt::Display for Solver<G> {
+impl fmt::Display for Board<Graph2d> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for (i, x) in self.grid.iter().enumerate() {
             match x {
@@ -104,7 +106,7 @@ impl<G: Game<Graph = Graph2d>> fmt::Display for Solver<G> {
                     remaining_mines, ..
                 } => write!(f, "{remaining_mines} ")?,
             }
-            if i % self.game.graph().width == self.game.graph().width - 1 {
+            if i % self.graph.width == self.graph.width - 1 {
                 writeln!(f)?;
             }
         }

@@ -1,17 +1,19 @@
-#![feature(generic_const_exprs)]
+#![feature(portable_simd)]
 #![allow(dead_code)]
 
 mod game;
+mod search;
 mod solver;
-// mod search;
-mod nn;
+mod solver2;
+mod solver3;
 
 pub use crate::game::*;
-pub use crate::solver::*;
 // pub use crate::search::*;
-pub use crate::nn::*;
+pub use crate::solver::*;
+// pub use crate::solver2::*;
+pub use crate::solver3::*;
 
-pub(crate) fn print_probs_2d(probs: &[E], width: usize) {
+pub(crate) fn print_probs_2d(probs: &[f64], width: usize) {
     for (i, prob) in probs.iter().enumerate() {
         print!("{prob:5.3} ");
 
@@ -21,60 +23,101 @@ pub(crate) fn print_probs_2d(probs: &[E], width: usize) {
     }
 }
 
+// fn generate_game() -> InternalGame<Graph2d> {
+// InternalGame::new(
+// 10,
+// StartType::SafeNeighborhood,
+// Graph2d::new(8, 8, &MOORE_NEIGHBORHOOD),
+// )
+// }
+
 fn generate_game() -> InternalGame<Graph2d> {
-    InternalGame::new(10, StartType::Safe, Graph2d::new(9, 9, &MOORE_NEIGHBORHOOD))
-}
-
-fn train_main() {
-    use dfdx::{
-        optim::{Adam, AdamConfig},
-        prelude::*,
-    };
-
-    let dev = D::default();
-    let mut net = dev.build_module::<Net, E>();
-    net.load_safetensors("nets/run1_net1500.safetensors").unwrap();
-    let mut optimizer: Adam<BuiltNet, E, D> = Adam::new(
-        &net,
-        AdamConfig {
-            lr: 5e-5,
-            ..AdamConfig::default()
-        },
-    );
-
-    for epoch in 1501.. {
-        println!("begin epoch {epoch}");
-        let games = std::iter::repeat_with(generate_game).take(250);
-
-        train(&dev, &mut net, &mut optimizer, games);
-
-        if epoch % 50 == 0 {
-            net.save_safetensors(format!("nets/run1_net{epoch}.safetensors")).expect("Failed to save network!");
-        }
-    }
-}
-
-fn eval_main() {
-    use dfdx::prelude::*;
-
-    let dev = D::default();
-    let mut net = dev.build_module::<Net, E>();
-    net.load_safetensors("nets/run1_net3600.safetensors").unwrap();
-
-    const NUM_GAMES: usize = 500;
-
-    let mut total_won = 0;
-    let mut total_games = 0;
-
-    loop {
-        let games = std::iter::repeat_with(generate_game).take(NUM_GAMES);
-        total_won += evaluate_performance(&dev, &net, games);
-        total_games += NUM_GAMES;
-
-        println!("{:.5}, {total_won}/{total_games}", total_won as f64 / total_games as f64);
-    }
+    InternalGame::new(
+        99,
+        StartType::SafeNeighborhood,
+        Graph2d::new(30, 16, &MOORE_NEIGHBORHOOD),
+    )
 }
 
 fn main() {
-    eval_main()
+    // let mut game = InternalGame::from_grid(bitvec::bitvec![usize, bitvec::order::Lsb0; 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1], Graph2d::new(4, 4, &MOORE_NEIGHBORHOOD));
+
+    for i in 0..10000 {
+        println!("{i}");
+        let mut game = generate_game();
+        // let mut game = InternalGame::from_grid(
+        // bitvec::bitvec![usize, bitvec::order::Lsb0;
+        // 0,0,0,0,1,0,0,0,
+        // 0,0,0,0,0,1,0,0,
+        // 1,1,0,0,0,0,0,0,
+        // 0,0,0,0,1,0,0,0,
+        // 0,0,0,0,1,1,0,0,
+        // 1,0,0,1,0,0,0,0,
+        // 0,0,1,0,0,0,0,0,
+        // 0,0,0,0,0,0,0,0,
+        // ],
+        // Graph2d::new(8, 8, &MOORE_NEIGHBORHOOD),
+        // );
+
+        let mut solver = MineArrangements::from_game(&game);
+        solver.add_constraint_with_game(0, &mut game).unwrap();
+        // println!("{game}");
+        solver.play_game(&mut game);
+
+        // let mut board = Board::from_game(&game);
+        // let mut solver = Solver::new(&mut board, &mut game);
+        // solver.uncover_tile(0).unwrap();
+        // solver.solve_csp();
+    }
+
+    // println!("{:x?}", solver);
+
+    // let mut board = Board::from_game(&game);
+
+    // let mut tree = MCTSTree::new(board.clone());
+    // let mut tree = Tree::new(board.clone());
+
+    // for _ in 0..10000 {
+    // tree.expand();
+    // }
+
+    // println!("{}", tree.best_guess());
+    // println!("{}", board);
+    // board.assert_tile(tree.best_guess());
+    // println!("{}", board);
+
+    // let mut wins: f64 = 0.;
+    // let mut games: f64 = 0.;
+
+    // loop {
+    // let mut game = generate_game();
+    // let mut board = Board::from_game(&game);
+
+    // let mut tree = MCTSTree::new(board.clone());
+    // let mut solver = Solver::new(&mut board, &mut game);
+
+    // let result = loop {
+    // for _ in 0..1000 {
+    // tree.expand();
+    // }
+
+    // let Some(()) = solver.uncover_tile(tree.best_guess()) else {
+    // break 0.;
+    // };
+
+    // solver.solve_csp();
+
+    // if solver.board().remaining_empty_tiles() == 0 {
+    // break 1.;
+    // }
+
+    // tree.set_root(solver.board().clone());
+    // tree.prune();
+    // };
+
+    // wins += result;
+    // games += 1.;
+
+    // println!("{}", wins / games);
+    // }
 }

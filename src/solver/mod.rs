@@ -27,20 +27,58 @@ pub enum Tile {
 
 pub use Tile::*;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Solver<G: Game> {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Board<G: Graph> {
     pub grid: Vec<Tile>,
-    pub game: G,
+    pub graph: G,
+    pub num_mines: usize,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Solver<'a, Gr: Graph, Ga: Game<Graph = Gr>> {
+    board: &'a mut Board<Gr>,
+    game: &'a mut Ga,
+}
+
+impl<'a, Gr: Graph, Ga: Game<Graph = Gr>> Solver<'a, Gr, Ga> {
+    pub fn new(board: &'a mut Board<Gr>, game: &'a mut Ga) -> Self {
+        assert!(board.graph == *game.graph());
+        Self { board, game }
+    }
+}
+
+impl<G: Graph> Graph for Board<G> {
+    fn for_each_neighbor(&self, pos: usize, callback: impl FnMut(usize)) {
+        self.graph.for_each_neighbor(pos, callback)
+    }
+
+    fn num_tiles(&self) -> usize {
+        self.graph.num_tiles()
+    }
 }
 
 impl Tile {
     fn needs_flag_fill(&self) -> bool {
-        let Hint { remaining_mines, empties, .. } = *self else { return false };
+        let Hint {
+            remaining_mines,
+            empties,
+            ..
+        } = *self
+        else {
+            return false;
+        };
         remaining_mines > 0 && remaining_mines == empties
     }
 
     fn needs_hint_fill(&self) -> bool {
-        let Hint { remaining_mines, empties, .. } = *self else { return false };
+        let Hint {
+            remaining_mines,
+            empties,
+            ..
+        } = *self
+        else {
+            return false;
+        };
         empties > 0 && remaining_mines == 0
     }
 
@@ -70,24 +108,35 @@ pub fn is_grid_subset_of(subset: &[Tile], set: &[Tile]) -> bool {
         .all(|(s1, s2)| s1.subset_of(s2))
 }
 
-impl<G: Game> Solver<G> {
-    pub fn new(game: G) -> Self {
+impl<G: Graph> Board<G> {
+    pub fn new(graph: G, num_mines: usize) -> Self {
         Self {
-            grid: vec![Empty; game.num_tiles()],
-            game,
+            grid: vec![Empty; graph.num_tiles()],
+            graph,
+            num_mines,
         }
     }
 
-    pub fn uncover_tile(&mut self, tile: usize) -> Option<()> {
-        if self.grid[tile] != Empty {
-            return Some(());
+    pub fn from_grid(grid: Vec<Tile>, graph: G, num_mines: usize) -> Self {
+        Self {
+            grid,
+            graph,
+            num_mines,
         }
+    }
 
-        let hint = self.game.explore_tile(tile)?;
+    pub fn from_game(game: &impl Game<Graph = G>) -> Self
+    where
+        G: Clone,
+    {
+        Self::new(game.graph().clone(), game.num_mines())
+    }
+
+    pub fn set_tile(&mut self, tile: usize, hint: u8) {
         let mut mines = 0;
         let mut empties = 0;
 
-        self.game.for_each_neighbor(tile, |n| {
+        self.graph.for_each_neighbor(tile, |n| {
             match self.grid[n] {
                 Mine { .. } => mines += 1,
                 Empty => empties += 1,
@@ -107,8 +156,6 @@ impl<G: Game> Solver<G> {
             remaining_mines: hint - mines,
             empties,
         };
-
-        Some(())
     }
 
     /// Assert that a tile is a hint without making any calls to Game::explore_tile to discover
@@ -122,7 +169,7 @@ impl<G: Game> Solver<G> {
             needs_propogate: true,
         };
 
-        self.game.for_each_neighbor(tile, |n| {
+        self.graph.for_each_neighbor(tile, |n| {
             if let Hint {
                 ref mut empties, ..
             } = self.grid[n]
@@ -134,7 +181,7 @@ impl<G: Game> Solver<G> {
 
     pub fn clear_tile(&mut self, tile: usize) {
         match self.grid[tile] {
-            Hint { .. } | AssertHint { .. } => self.game.for_each_neighbor(tile, |n| {
+            Hint { .. } | AssertHint { .. } => self.graph.for_each_neighbor(tile, |n| {
                 if let Hint {
                     ref mut empties, ..
                 } = self.grid[n]
@@ -142,7 +189,7 @@ impl<G: Game> Solver<G> {
                     *empties += 1;
                 }
             }),
-            Mine { .. } => self.game.for_each_neighbor(tile, |n| {
+            Mine { .. } => self.graph.for_each_neighbor(tile, |n| {
                 if let Hint {
                     ref mut remaining_mines,
                     ref mut empties,
@@ -167,7 +214,7 @@ impl<G: Game> Solver<G> {
             needs_propogate: true,
         };
 
-        self.game.for_each_neighbor(tile, |n| {
+        self.graph.for_each_neighbor(tile, |n| {
             if let Hint {
                 ref mut remaining_mines,
                 ref mut empties,
@@ -180,15 +227,43 @@ impl<G: Game> Solver<G> {
         })
     }
 
+    pub fn is_solved(&self) -> bool {
+        self.remaining_empty_tiles() == self.remaining_mines()
+    }
+}
+
+impl<'a, Gr: Graph, Ga: Game<Graph = Gr>> Solver<'a, Gr, Ga> {
+    #[must_use]
+    pub fn uncover_tile(&mut self, tile: usize) -> Option<()> {
+        if self.board.grid[tile] != Empty {
+            return Some(());
+        }
+
+        let hint = self.game.explore_tile(tile)?;
+        self.board.set_tile(tile, hint);
+
+        Some(())
+    }
+
+    pub fn board(&self) -> &Board<Gr> {
+        &*self.board
+    }
+
+    pub fn game(&self) -> &Ga {
+        &*self.game
+    }
+
     pub fn propogate(&mut self, tile: &mut Vec<usize>) {
         let stack = tile;
         let mut neighbors = Vec::with_capacity(8);
 
         while let Some(loc) = stack.last().copied() {
-            let tile = &mut self.grid[loc];
+            let tile = &mut self.board.grid[loc];
 
             neighbors.clear();
-            self.game.for_each_neighbor(loc, |n| neighbors.push(n));
+            self.board
+                .graph
+                .for_each_neighbor(loc, |n| neighbors.push(n));
 
             if let Mine {
                 ref mut needs_propogate,
@@ -199,7 +274,7 @@ impl<G: Game> Solver<G> {
 
             if tile.needs_flag_fill() {
                 for n in &neighbors {
-                    self.flag_tile(*n);
+                    self.board.flag_tile(*n);
                 }
             } else if tile.needs_hint_fill() {
                 for n in &neighbors {
@@ -207,7 +282,10 @@ impl<G: Game> Solver<G> {
                 }
             }
 
-            if let Some(next) = neighbors.iter().find(|n| self.grid[**n].needs_propogate()) {
+            if let Some(next) = neighbors
+                .iter()
+                .find(|n| self.board.grid[**n].needs_propogate())
+            {
                 stack.push(*next);
             } else {
                 stack.pop();

@@ -1,12 +1,11 @@
 use bitvec::prelude::*;
-use itertools::Itertools;
 use rand::prelude::*;
 
 mod game2d;
 
 pub use game2d::*;
 
-pub trait Graph {
+pub trait Graph: Clone + PartialEq + Eq {
     fn for_each_neighbor(&self, pos: usize, callback: impl FnMut(usize));
     fn num_tiles(&self) -> usize;
 }
@@ -15,11 +14,12 @@ pub trait Game {
     type Graph: Graph;
 
     fn graph(&self) -> &Self::Graph;
+    #[must_use]
     fn explore_tile(&mut self, pos: usize) -> Option<u8>;
     fn num_mines(&self) -> usize;
 }
 
-impl<G: Game> Graph for G {
+impl<G: Game + Clone + Eq> Graph for G {
     fn for_each_neighbor(&self, pos: usize, callback: impl FnMut(usize)) {
         self.graph().for_each_neighbor(pos, callback)
     }
@@ -29,7 +29,7 @@ impl<G: Game> Graph for G {
     }
 }
 
-// returns n unique randome numbers from 0 to max - 1
+// returns n unique random numbers from 0 to max - 1
 pub(crate) fn n_unique_random(
     max: usize,
     n: usize,
@@ -51,7 +51,7 @@ pub enum StartType {
     SafeNeighborhood,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InternalGame<G: Graph> {
     pub grid: Option<BitVec>,
     start_type: StartType,
@@ -76,43 +76,54 @@ impl<G: Graph> InternalGame<G> {
         Self::new(game.num_mines(), start_type, game.graph().clone())
     }
 
+    pub fn from_grid(grid: BitVec, graph: G) -> Self {
+        Self {
+            num_mines: grid.count_ones(),
+            grid: Some(grid),
+            start_type: StartType::Unsafe,
+            graph,
+        }
+    }
+
     fn explore_tile_inner(&self, grid: &BitVec, pos: usize) -> Option<u8> {
-        (!grid[pos]).then(|| {
-            let mut count = 0;
+        if grid[pos] {
+            return None;
+        }
 
-            self.for_each_neighbor(pos, |pos2| {
-                count += grid[pos2] as u8;
-            });
+        let mut count = 0;
 
-            count
-        })
+        self.for_each_neighbor(pos, |pos2| {
+            count += grid[pos2] as u8;
+        });
+
+        Some(count)
     }
 
     fn generate_grid(&self, pos: usize) -> BitVec {
         let mut out = bitvec![usize, Lsb0; 0; self.num_tiles()];
-        let mut rng = thread_rng();
+        let mut safe: Vec<usize> = Vec::new();
 
-        if self.start_type == StartType::Unsafe {
-            for i in n_unique_random(self.num_tiles(), self.num_mines(), &mut rng) {
-                out.set(i, true);
+        match self.start_type {
+            StartType::Unsafe => {}
+            StartType::Safe => safe.push(pos),
+            StartType::SafeNeighborhood => {
+                safe.push(pos);
+
+                self.for_each_neighbor(pos, |pos2| safe.push(pos2))
             }
-
-            return out;
         }
 
-        let mut allowed = bitvec![usize, Lsb0; 1; self.num_tiles()];
+        let mut allowed: Vec<usize> = (0..self.num_tiles()).collect();
 
-        allowed.set(pos, false);
-        if self.start_type == StartType::SafeNeighborhood {
-            self.for_each_neighbor(pos, |pos2| {
-                allowed.set(pos2, false);
-            })
+        safe.sort_unstable();
+        for s in safe.iter().rev() {
+            allowed.swap_remove(*s);
         }
 
-        let mut allowed = allowed.iter_ones().collect_vec();
+        let (mines, _) = allowed.partial_shuffle(&mut thread_rng(), self.num_mines);
 
-        for i in (0..self.num_mines).map(|_| allowed.swap_remove(rng.gen_range(0..allowed.len()))) {
-            out.set(i, true);
+        for i in mines {
+            out.set(*i, true);
         }
 
         out

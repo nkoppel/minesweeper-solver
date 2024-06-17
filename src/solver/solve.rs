@@ -6,7 +6,7 @@ use smallvec::*;
 
 use super::solutionset::SolutionSet;
 
-impl<G: Game> Solver<G> {
+impl<G: Graph> Board<G> {
     /// Assigns a group id to each empty cell so that empty cells with the same id are constrained
     /// by the same set of hints.
     fn cell_groups(&self) -> Vec<Option<usize>> {
@@ -24,7 +24,7 @@ impl<G: Game> Solver<G> {
             .iter()
             .positions(|c| matches!(c, Hint { empties: 1.., .. }))
         {
-            self.game.for_each_neighbor(i, |j| {
+            self.graph.for_each_neighbor(i, |j| {
                 if self.grid[j] != Empty {
                     return;
                 }
@@ -41,7 +41,7 @@ impl<G: Game> Solver<G> {
                 }
             });
 
-            self.game.for_each_neighbor(i, |j| {
+            self.graph.for_each_neighbor(i, |j| {
                 if self.grid[j] != Empty {
                     return;
                 }
@@ -74,7 +74,7 @@ impl<G: Game> Solver<G> {
         out
     }
 
-    pub fn extract_constraints(&self) -> (Vec<Vec<usize>>, Vec<SubSolutionSet>) {
+    fn extract_constraints(&self) -> (Vec<Vec<usize>>, Vec<SubSolutionSet>) {
         let cell_groups = self.cell_groups();
         let mut cell_groups_out = Vec::new();
 
@@ -97,10 +97,17 @@ impl<G: Game> Solver<G> {
             .iter()
             .enumerate()
             .filter_map(|(i, hint)| {
-                let Hint { remaining_mines, empties: 1.., .. } = hint else { return None };
+                let Hint {
+                    remaining_mines,
+                    empties: 1..,
+                    ..
+                } = hint
+                else {
+                    return None;
+                };
                 let mut mask = smallvec![0; cell_groups_out.len()];
 
-                self.game.for_each_neighbor(i, |j| {
+                self.graph.for_each_neighbor(i, |j| {
                     if self.grid[j] != Empty {
                         return;
                     }
@@ -125,22 +132,28 @@ impl<G: Game> Solver<G> {
             .filter(|s| matches!(s, Mine { .. }))
             .count();
 
-        self.game.num_mines() - placed_mines
+        self.num_mines - placed_mines
     }
 
     pub fn remaining_empty_tiles(&self) -> usize {
         self.grid.iter().filter(|s| matches!(s, Empty)).count()
     }
 
-    pub fn solve_csp(&mut self) -> Option<SolutionSet> {
+    pub fn get_solutionset(&self) -> SolutionSet {
+        let (groups, mut subsolutions) = self.extract_constraints();
+
+        merge_all_subsolutions(&mut subsolutions);
+
+        SolutionSet::new(self, groups, subsolutions)
+    }
+}
+
+impl<'a, Gr: Graph, Ga: Game<Graph = Gr>> Solver<'a, Gr, Ga> {
+    pub fn solve_csp(&mut self) -> SolutionSet {
         let mut tiles = Vec::new();
 
         loop {
-            let (groups, mut subsolutions) = self.extract_constraints();
-
-            if self.remaining_empty_tiles() == 0 {
-                return None;
-            }
+            let (groups, mut subsolutions) = self.board.extract_constraints();
 
             merge_all_subsolutions(&mut subsolutions);
 
@@ -159,7 +172,7 @@ impl<G: Game> Solver<G> {
             for i in all_mines.iter_ones() {
                 for tile in &groups[i] {
                     tiles.push(*tile);
-                    self.flag_tile(*tile);
+                    self.board.flag_tile(*tile);
                 }
             }
 
@@ -167,15 +180,18 @@ impl<G: Game> Solver<G> {
                 self.propogate(&mut tiles);
                 continue;
             }
-            let solutionset = SolutionSet::new(self, groups, subsolutions);
-            let mine_probs = solutionset.tile_mine_probabilities();
+            let solutionset = SolutionSet::new(self.board, groups, subsolutions);
+            let (safe_tiles, mine_tiles) = solutionset.safe_and_mine_tiles();
 
-            for (tile, prob) in mine_probs.iter().enumerate() {
-                if *prob == 0. && self.grid[tile] == Empty {
-                    tiles.push(tile);
-                    self.uncover_tile(tile)
-                        .unwrap_or_else(|| panic!("Attempted to uncover mine at {tile:?}!"));
-                }
+            for tile in safe_tiles.iter_ones() {
+                tiles.push(tile);
+                self.uncover_tile(tile)
+                    .unwrap_or_else(|| panic!("Attempted to uncover mine at {tile:?}!"));
+            }
+
+            for tile in mine_tiles.iter_ones() {
+                tiles.push(tile);
+                self.board.flag_tile(tile);
             }
 
             if !tiles.is_empty() {
@@ -183,19 +199,7 @@ impl<G: Game> Solver<G> {
                 continue;
             }
 
-            return Some(solutionset);
+            return solutionset;
         }
-    }
-
-    pub fn get_solutionset(&self) -> Option<SolutionSet> {
-        if self.remaining_empty_tiles() == 0 {
-            return None;
-        }
-
-        let (groups, mut subsolutions) = self.extract_constraints();
-
-        merge_all_subsolutions(&mut subsolutions);
-
-        Some(SolutionSet::new(self, groups, subsolutions))
     }
 }

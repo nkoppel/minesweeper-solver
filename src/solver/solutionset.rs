@@ -60,12 +60,12 @@ fn ubig_ratio_to_float(mut n: UBig, mut d: UBig) -> f64 {
 
 impl SolutionSet {
     pub fn new(
-        solver: &Solver<impl Game>,
+        board: &Board<impl Graph>,
         groups: Vec<Vec<usize>>,
         subsolutions: Vec<SubSolutionSet>,
     ) -> Self {
-        let remaining_empties = solver.remaining_empty_tiles();
-        let remaining_mines = solver.remaining_mines();
+        let remaining_empties = board.remaining_empty_tiles();
+        let remaining_mines = board.remaining_mines();
 
         let num_solutions_with_num_mines = subsolutions
             .iter()
@@ -104,8 +104,12 @@ impl SolutionSet {
             })
             .collect();
 
+        if subsolutions.is_empty() {
+            prefix_sum = n_choose_k(unconstrained_empties, remaining_mines);
+        }
+
         SolutionSet {
-            grid: solver.grid.clone(),
+            grid: board.grid.clone(),
             groups,
             subsolutions,
             num_solutions_with_num_mines,
@@ -116,9 +120,12 @@ impl SolutionSet {
         }
     }
 
-    fn unconstrained_mine_probability(&self) -> f64 {
+    pub fn unconstrained_mine_count(&self) -> UBig {
+        if self.remaining_empties == 0 {
+            return ubig!(0);
+        }
         if self.subsolution_mine_counts.is_empty() {
-            return self.remaining_mines as f64 / self.remaining_empties as f64;
+            return &self.total_num_solutions * self.remaining_mines / self.remaining_empties;
         }
 
         let constrained_empties = self
@@ -128,36 +135,35 @@ impl SolutionSet {
             .sum::<usize>();
         let unconstrained_empties = self.remaining_empties - constrained_empties;
 
+        if unconstrained_empties == 0 {
+            return ubig!(0);
+        }
+
         self.subsolution_mine_counts
             .iter()
             .map(|(counts, num_solutions, _)| {
                 let constrained_mines = counts.iter().sum::<usize>();
                 let unconstrained_mines = self.remaining_mines - constrained_mines;
 
-                let weight =
-                    ubig_ratio_to_float(num_solutions.clone(), self.total_num_solutions.clone());
-                weight * unconstrained_mines as f64 / unconstrained_empties as f64
+                num_solutions * unconstrained_mines / unconstrained_empties
             })
-            .sum()
+            .fold(ubig!(0), |sum, count| sum + count)
     }
 
-    fn group_mine_probabilities(&self) -> Vec<f64> {
+    fn group_mine_counts(&self) -> Vec<UBig> {
         if self.subsolutions.is_empty() {
             return Vec::new();
         }
 
         // mapping from subsolution mine count to number of solutions
-        let mut total_solutions_with_num_mines: Vec<HashMap<usize, f64>> =
+        let mut total_solutions_with_num_mines: Vec<HashMap<usize, UBig>> =
             vec![HashMap::new(); self.subsolutions.len()];
 
         for (counts, num_solutions, _) in self.subsolution_mine_counts.iter() {
             for (id, count) in counts.iter().enumerate() {
-                let ratio =
-                    ubig_ratio_to_float(num_solutions.clone(), self.total_num_solutions.clone());
-
                 *total_solutions_with_num_mines[id]
                     .entry(*count)
-                    .or_default() += ratio;
+                    .or_default() += num_solutions;
             }
         }
 
@@ -174,51 +180,127 @@ impl SolutionSet {
                     let num_solutions = solution_count(s, &sol.mask);
                     let num_total_solutions = solutions_with_count[&count];
 
-                    let prob =
-                        num_solutions as f64 / num_total_solutions as f64 * probs.get(&count)?;
+                    let prob = probs.get(&count)? * num_solutions / num_total_solutions;
 
-                    Some(
-                        s.iter()
-                            .zip(sol.mask.iter())
-                            .map(move |(&s, &m)| s as f64 / m as f64 * prob),
-                    )
+                    Some(s.iter().zip(sol.mask.iter()).map(move |(&s, &m)| {
+                        if m == 0 {
+                            ubig!(0)
+                        } else {
+                            prob.clone() * s / m
+                        }
+                    }))
                 })
             })
             .fold(
-                vec![0.; self.subsolutions[0].mask.len()],
+                vec![ubig!(0); self.subsolutions[0].mask.len()],
                 |mut sum, iter| {
                     for (s, x) in sum.iter_mut().zip(iter) {
-                        if x.is_finite() {
-                            *s += x;
-                        }
+                        *s += x;
                     }
                     sum
                 },
             )
     }
 
-    pub fn tile_mine_probabilities(&self) -> Vec<f64> {
-        let unconstrained_prob = self.unconstrained_mine_probability();
-        let group_probs = self.group_mine_probabilities();
+    pub fn total_solution_count(&self) -> UBig {
+        self.total_num_solutions.clone()
+    }
+
+    pub fn tile_mine_counts(&self) -> Vec<UBig> {
+        let unconstrained_count = self.unconstrained_mine_count();
+        let group_counts = self.group_mine_counts();
 
         let mut out = self
             .grid
             .iter()
             .map(|tile| match tile {
-                Empty => unconstrained_prob,
-                Mine { .. } => 1.0,
-                AssertHint { .. } => 0.0,
-                Hint { .. } => 0.0,
+                Empty => unconstrained_count.clone(),
+                Mine { .. } => self.total_num_solutions.clone(),
+                AssertHint { .. } => ubig!(0),
+                Hint { .. } => ubig!(0),
             })
             .collect::<Vec<_>>();
 
-        for (group, prob) in self.groups.iter().zip(group_probs.iter()) {
+        for (group, count) in self.groups.iter().zip(group_counts.iter()) {
             for g in group {
-                out[*g] = *prob;
+                out[*g].clone_from(count);
             }
         }
 
         out
+    }
+
+    pub fn tile_safe_counts(&self) -> Vec<UBig> {
+        let unconstrained_count = self.unconstrained_mine_count();
+        let group_counts = self.group_mine_counts();
+
+        let unconstrained_safe_count = &self.total_num_solutions - unconstrained_count;
+
+        let mut out = self
+            .grid
+            .iter()
+            .map(|tile| match tile {
+                Empty => unconstrained_safe_count.clone(),
+                _ => ubig!(0),
+            })
+            .collect::<Vec<_>>();
+
+        for (group, count) in self.groups.iter().zip(group_counts.iter()) {
+            for g in group {
+                out[*g] = &self.total_num_solutions - count.clone();
+            }
+        }
+
+        out
+    }
+
+    pub fn safe_and_mine_tiles(&self) -> (BitVec, BitVec) {
+        let unconstrained_count = self.unconstrained_mine_count();
+        let group_counts = self.group_mine_counts();
+
+        let are_unconstrained_safe = unconstrained_count == ubig!(0);
+        let are_unconstrained_mines = unconstrained_count == self.total_num_solutions;
+
+        let mut safe_tiles: BitVec = self
+            .grid
+            .iter()
+            .map(|tile| match tile {
+                Empty => are_unconstrained_safe,
+                _ => false,
+            })
+            .collect();
+
+        let mut mine_tiles: BitVec = self
+            .grid
+            .iter()
+            .map(|tile| match tile {
+                Empty => are_unconstrained_mines,
+                _ => false,
+            })
+            .collect();
+
+        for (group, count) in self.groups.iter().zip(group_counts.iter()) {
+            for g in group {
+                safe_tiles.set(*g, count == &ubig!(0));
+                mine_tiles.set(*g, count == &self.total_num_solutions);
+            }
+        }
+
+        (safe_tiles, mine_tiles)
+    }
+
+    pub fn tile_mine_probabilities(&self) -> Vec<f64> {
+        self.tile_mine_counts()
+            .into_iter()
+            .map(|count| ubig_ratio_to_float(count, self.total_num_solutions.clone()))
+            .collect()
+    }
+
+    pub fn tile_safe_probabilities(&self) -> Vec<f64> {
+        self.tile_safe_counts()
+            .into_iter()
+            .map(|count| ubig_ratio_to_float(count, self.total_num_solutions.clone()))
+            .collect()
     }
 
     fn sample(&self, rng: &mut impl Rng) -> IntVec {
