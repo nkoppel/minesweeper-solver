@@ -6,7 +6,8 @@ mod game2d;
 pub use game2d::*;
 
 pub trait Graph: Clone + PartialEq + Eq {
-    fn for_each_neighbor(&self, pos: usize, callback: impl FnMut(usize));
+    fn neighbors(&self, pos: usize) -> impl Iterator<Item = usize> + '_;
+
     fn num_tiles(&self) -> usize;
 }
 
@@ -20,8 +21,8 @@ pub trait Game {
 }
 
 impl<G: Game + Clone + Eq> Graph for G {
-    fn for_each_neighbor(&self, pos: usize, callback: impl FnMut(usize)) {
-        self.graph().for_each_neighbor(pos, callback)
+    fn neighbors(&self, pos: usize) -> impl Iterator<Item = usize> + '_ {
+        self.graph().neighbors(pos)
     }
 
     fn num_tiles(&self) -> usize {
@@ -92,9 +93,9 @@ impl<G: Graph> InternalGame<G> {
 
         let mut count = 0;
 
-        self.for_each_neighbor(pos, |pos2| {
+        for pos2 in self.neighbors(pos) {
             count += grid[pos2] as u8;
-        });
+        }
 
         Some(count)
     }
@@ -108,8 +109,7 @@ impl<G: Graph> InternalGame<G> {
             StartType::Safe => safe.push(pos),
             StartType::SafeNeighborhood => {
                 safe.push(pos);
-
-                self.for_each_neighbor(pos, |pos2| safe.push(pos2))
+                safe.extend(self.neighbors(pos));
             }
         }
 

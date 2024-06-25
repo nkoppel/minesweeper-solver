@@ -7,6 +7,11 @@ mod solver;
 mod solver2;
 mod solver3;
 
+mod bitset;
+mod board;
+mod solution_set;
+mod solver_struct;
+
 pub use crate::game::*;
 // pub use crate::search::*;
 pub use crate::solver::*;
@@ -42,32 +47,38 @@ fn generate_game() -> InternalGame<Graph2d> {
 fn main() {
     // let mut game = InternalGame::from_grid(bitvec::bitvec![usize, bitvec::order::Lsb0; 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1], Graph2d::new(4, 4, &MOORE_NEIGHBORHOOD));
 
-    for i in 0..10000 {
+    for i in 0..100000 {
         println!("{i}");
         let mut game = generate_game();
-        // let mut game = InternalGame::from_grid(
+        // let game = InternalGame::from_grid(
         // bitvec::bitvec![usize, bitvec::order::Lsb0;
-        // 0,0,0,0,1,0,0,0,
-        // 0,0,0,0,0,1,0,0,
-        // 1,1,0,0,0,0,0,0,
-        // 0,0,0,0,1,0,0,0,
-        // 0,0,0,0,1,1,0,0,
-        // 1,0,0,1,0,0,0,0,
-        // 0,0,1,0,0,0,0,0,
+        // 0,0,0,0,0,0,1,1,
+        // 0,0,0,0,0,0,0,1,
+        // 0,1,0,0,0,1,0,0,
+        // 0,1,0,0,0,0,0,0,
+        // 0,0,0,0,0,0,1,0,
+        // 0,0,1,0,0,0,1,0,
         // 0,0,0,0,0,0,0,0,
+        // 1,0,0,0,0,0,0,0,
         // ],
         // Graph2d::new(8, 8, &MOORE_NEIGHBORHOOD),
         // );
 
-        let mut solver = MineArrangements::from_game(&game);
-        solver.add_constraint_with_game(0, &mut game).unwrap();
+        // let mut solver = MineArrangements::from_game(&game);
+        // solver.add_constraint_with_game(0, &mut game).unwrap();
         // println!("{game}");
-        solver.play_game(&mut game);
+        // solver.play_game(&mut game);
 
         // let mut board = Board::from_game(&game);
         // let mut solver = Solver::new(&mut board, &mut game);
         // solver.uncover_tile(0).unwrap();
+        // solver.propogate(&mut vec![0]);
         // solver.solve_csp();
+
+        let mut solver = solver_struct::Solver::from_game(game);
+        solver.uncover_tile(0).unwrap();
+        solver.propogate(&mut vec![0]).unwrap();
+        // solver.solve().unwrap();
     }
 
     // println!("{:x?}", solver);

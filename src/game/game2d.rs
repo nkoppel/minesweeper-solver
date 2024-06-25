@@ -58,17 +58,15 @@ impl Graph2d {
 }
 
 impl Graph for Graph2d {
-    fn for_each_neighbor(&self, pos: usize, mut callback: impl FnMut(usize)) {
+    fn num_tiles(&self) -> usize {
+        self.width * self.height
+    }
+
+    fn neighbors(&self, pos: usize) -> impl Iterator<Item = usize> + '_ {
         let size = (self.width, self.height);
         let pos2d = (pos % self.width, pos / self.width);
 
-        for (x, y) in valid_neighbors_2d(self.neighbors.iter().copied(), size, pos2d) {
-            callback(x + y * self.width)
-        }
-    }
-
-    fn num_tiles(&self) -> usize {
-        self.width * self.height
+        valid_neighbors_2d(self.neighbors.iter().copied(), size, pos2d).map(|(x, y)| x + y * self.width)
     }
 }
 
@@ -93,7 +91,7 @@ impl fmt::Display for InternalGame<Graph2d> {
     }
 }
 
-use crate::solver::*;
+use crate::board::*;
 
 impl fmt::Display for Board<Graph2d> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

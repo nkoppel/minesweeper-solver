@@ -1,6 +1,7 @@
 use std::{cmp::Ordering, collections::HashMap};
 
 pub use bitvec::prelude::*;
+use itertools::{iproduct, Itertools};
 use smallvec::*;
 
 pub type IntVec = SmallVec<[u8; 64]>;
@@ -119,6 +120,10 @@ pub(super) fn equal_on_intersection(intersection: &[u8], a: &[u8], b: &[u8]) -> 
         .all(|(i, (a, b))| *i == 0 || *a == *b)
 }
 
+pub(super) fn overlaps(a: &[u8], b: &[u8]) -> bool {
+    a.iter().zip(b).any(|(&a, &b)| a > 0 && b > 0)
+}
+
 fn compare_on_intersection(intersection: &[u8], a: &[u8], b: &[u8]) -> Ordering {
     let a_iter = a.iter().zip(intersection).map(|(s, i)| s.min(i));
     let b_iter = b.iter().zip(intersection).map(|(s, i)| s.min(i));
@@ -128,7 +133,7 @@ fn compare_on_intersection(intersection: &[u8], a: &[u8], b: &[u8]) -> Ordering 
 
 impl SubSolutionSet {
     pub fn from_constraint(mask: IntVec, count: usize) -> Self {
-        let solutions = CombinationsIter::new(mask.clone(), count).collect::<Vec<_>>();
+        let solutions = CombinationsIter::new(mask.clone(), count).collect_vec();
 
         Self { mask, solutions }
     }
@@ -207,16 +212,6 @@ impl SubSolutionSet {
             .all(|sol| equal_on_intersection(intersection, first, sol))
     }
 
-    fn group_on_mask<'a>(
-        &'a mut self,
-        mask: &'a [u8],
-    ) -> impl Iterator<Item = &[SmallVec<[u8; 64]>]> + 'a {
-        self.solutions
-            .sort_unstable_by(|a, b| compare_on_intersection(mask, a, b));
-        self.solutions
-            .chunk_by(|a, b| equal_on_intersection(mask, a, b))
-    }
-
     pub fn try_merge(&mut self, mut other: Self) -> Result<(), Self> {
         let mask = intvec_or(&self.mask, &other.mask);
         let intersection = intvec_and(&self.mask, &other.mask);
@@ -243,51 +238,10 @@ impl SubSolutionSet {
             }
         }
 
-        let mut solutions = Vec::new();
-
-        // Alternative way to merge groups that should be faster in theory but ends up being
-        // slower in practice. Keeping this around for the sake of it.
-
-        // let mut groups1 = self.group_on_mask(&intersection).peekable();
-        // let mut groups2 = other.group_on_mask(&intersection).peekable();
-
-        // loop {
-        // let (Some(&group1), Some(&group2)) = (groups1.peek(), groups2.peek()) else {
-        // break;
-        // };
-
-        // match compare_on_intersection(&intersection, &group1[0], &group2[0]) {
-        // Ordering::Less => {
-        // groups1.next();
-        // continue;
-        // },
-        // Ordering::Greater => {
-        // groups2.next();
-        // continue;
-        // },
-        // Ordering::Equal => {},
-        // }
-
-        // for sol1 in group1 {
-        // for sol2 in group2 {
-        // solutions.push(intvec_or(sol1, sol2));
-        // }
-        // }
-
-        // groups1.next();
-        // groups2.next();
-        // }
-
-        // std::mem::drop(groups1);
-        // std::mem::drop(groups2);
-
-        for sol1 in &self.solutions {
-            for sol2 in &other.solutions {
-                if equal_on_intersection(&intersection, sol1, sol2) {
-                    solutions.push(intvec_or(sol1, sol2))
-                }
-            }
-        }
+        let solutions = iproduct!(&self.solutions, &other.solutions)
+            .filter(|(sol1, sol2)| equal_on_intersection(&intersection, sol1, sol2))
+            .map(|(sol1, sol2)| intvec_or(sol1, sol2))
+            .collect_vec();
 
         *self = Self { mask, solutions };
         Ok(())

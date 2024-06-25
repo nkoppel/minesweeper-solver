@@ -24,9 +24,9 @@ impl<G: Graph> Board<G> {
             .iter()
             .positions(|c| matches!(c, Hint { empties: 1.., .. }))
         {
-            self.graph.for_each_neighbor(i, |j| {
+            for j in self.neighbors(i) {
                 if self.grid[j] != Empty {
-                    return;
+                    continue;
                 }
 
                 let id = group_ids[j];
@@ -39,18 +39,18 @@ impl<G: Graph> Board<G> {
                     mapping.push(0);
                     is_mapped.push(false);
                 }
-            });
+            }
 
-            self.graph.for_each_neighbor(i, |j| {
+            for j in self.neighbors(i) {
                 if self.grid[j] != Empty {
-                    return;
+                    continue;
                 }
 
                 let id = group_ids[j];
 
                 group_ids[j] = mapping[id];
                 is_mapped[id] = false;
-            });
+            }
         }
 
         max_group = 0;
@@ -107,13 +107,13 @@ impl<G: Graph> Board<G> {
                 };
                 let mut mask = smallvec![0; cell_groups_out.len()];
 
-                self.graph.for_each_neighbor(i, |j| {
+                for j in self.neighbors(i) {
                     if self.grid[j] != Empty {
-                        return;
+                        continue;
                     }
                     let group = cell_groups[j].unwrap();
                     mask[group] = full_mask[group];
-                });
+                }
 
                 Some(SubSolutionSet::from_constraint(
                     mask,

@@ -1,13 +1,4 @@
-mod csp;
-mod solutionset;
-mod solve;
-
-pub use std::collections::{HashSet, VecDeque};
-
 use crate::game::*;
-pub use csp::*;
-pub use solutionset::*;
-pub use solve::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tile {
@@ -34,19 +25,6 @@ pub struct Board<G: Graph> {
     pub num_mines: usize,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Solver<'a, Gr: Graph, Ga: Game<Graph = Gr>> {
-    board: &'a mut Board<Gr>,
-    game: &'a mut Ga,
-}
-
-impl<'a, Gr: Graph, Ga: Game<Graph = Gr>> Solver<'a, Gr, Ga> {
-    pub fn new(board: &'a mut Board<Gr>, game: &'a mut Ga) -> Self {
-        assert!(board.graph == *game.graph());
-        Self { board, game }
-    }
-}
-
 impl<G: Graph> Graph for Board<G> {
     fn neighbors(&self, pos: usize) -> impl Iterator<Item = usize> + '_ {
         self.graph.neighbors(pos)
@@ -58,7 +36,7 @@ impl<G: Graph> Graph for Board<G> {
 }
 
 impl Tile {
-    fn needs_flag_fill(&self) -> bool {
+    pub fn needs_flag_fill(&self) -> bool {
         let Hint {
             remaining_mines,
             empties,
@@ -70,7 +48,7 @@ impl Tile {
         remaining_mines > 0 && remaining_mines == empties
     }
 
-    fn needs_hint_fill(&self) -> bool {
+    pub fn needs_hint_fill(&self) -> bool {
         let Hint {
             remaining_mines,
             empties,
@@ -82,7 +60,7 @@ impl Tile {
         empties > 0 && remaining_mines == 0
     }
 
-    fn needs_propogate(&self) -> bool {
+    pub fn needs_propogate(&self) -> bool {
         match *self {
             Empty => false,
             Mine { needs_propogate } => needs_propogate,
@@ -92,11 +70,11 @@ impl Tile {
     }
 
     pub fn subset_of(&self, other: &Self) -> bool {
-        match (self, other) {
-            (_, Empty) => true,
-            (Hint { .. }, AssertHint { .. }) => true,
-            (Hint { hint: h1, .. }, Hint { hint: h2, .. }) => h1 == h2,
-            _ => false,
+        match other {
+            Empty => true,
+            Mine { .. } => matches!(self, Mine { .. }),
+            AssertHint { .. } => matches!(self, Hint { .. } | AssertHint { .. }),
+            Hint { hint: h1, .. } => matches!(self, Hint { hint: h2, .. } if h1 == h2),
         }
     }
 }
@@ -227,67 +205,25 @@ impl<G: Graph> Board<G> {
         }
     }
 
+    pub fn remaining_mines(&self) -> usize {
+        let placed_mines = self
+            .grid
+            .iter()
+            .filter(|s| matches!(s, Mine { .. }))
+            .count();
+
+        self.num_mines - placed_mines
+    }
+
+    pub fn remaining_empty_tiles(&self) -> usize {
+        self.grid.iter().filter(|s| matches!(s, Empty)).count()
+    }
+
     pub fn is_solved(&self) -> bool {
         self.remaining_empty_tiles() == self.remaining_mines()
     }
-}
 
-impl<'a, Gr: Graph, Ga: Game<Graph = Gr>> Solver<'a, Gr, Ga> {
-    #[must_use]
-    pub fn uncover_tile(&mut self, tile: usize) -> Option<()> {
-        if self.board.grid[tile] != Empty {
-            return Some(());
-        }
-
-        let hint = self.game.explore_tile(tile)?;
-        self.board.set_tile(tile, hint);
-
-        Some(())
-    }
-
-    pub fn board(&self) -> &Board<Gr> {
-        &*self.board
-    }
-
-    pub fn game(&self) -> &Ga {
-        &*self.game
-    }
-
-    pub fn propogate(&mut self, tile: &mut Vec<usize>) {
-        let stack = tile;
-        let mut neighbors = Vec::with_capacity(8);
-
-        while let Some(loc) = stack.last().copied() {
-            let tile = &mut self.board.grid[loc];
-
-            neighbors.clear();
-            neighbors.extend(self.board.graph.neighbors(loc));
-
-            if let Mine {
-                ref mut needs_propogate,
-            } = tile
-            {
-                *needs_propogate = false;
-            }
-
-            if tile.needs_flag_fill() {
-                for n in &neighbors {
-                    self.board.flag_tile(*n);
-                }
-            } else if tile.needs_hint_fill() {
-                for n in &neighbors {
-                    self.uncover_tile(*n).unwrap();
-                }
-            }
-
-            if let Some(next) = neighbors
-                .iter()
-                .find(|n| self.board.grid[**n].needs_propogate())
-            {
-                stack.push(*next);
-            } else {
-                stack.pop();
-            }
-        }
+    pub fn subset_of(&self, other: &Self) -> bool {
+        self.num_mines == other.num_mines && is_grid_subset_of(&self.grid, &other.grid)
     }
 }
