@@ -7,7 +7,6 @@ pub use std::collections::{HashSet, VecDeque};
 use crate::game::*;
 pub use csp::*;
 pub use solutionset::*;
-pub use solve::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tile {
@@ -181,25 +180,29 @@ impl<G: Graph> Board<G> {
 
     pub fn clear_tile(&mut self, tile: usize) {
         match self.grid[tile] {
-            Hint { .. } | AssertHint { .. } => for n in self.graph.neighbors(tile) {
-                if let Hint {
-                    ref mut empties, ..
-                } = self.grid[n]
-                {
-                    *empties += 1;
+            Hint { .. } | AssertHint { .. } => {
+                for n in self.graph.neighbors(tile) {
+                    if let Hint {
+                        ref mut empties, ..
+                    } = self.grid[n]
+                    {
+                        *empties += 1;
+                    }
                 }
-            },
-            Mine { .. } => for n in self.graph.neighbors(tile) {
-                if let Hint {
-                    ref mut remaining_mines,
-                    ref mut empties,
-                    ..
-                } = self.grid[n]
-                {
-                    *remaining_mines += 1;
-                    *empties += 1;
+            }
+            Mine { .. } => {
+                for n in self.graph.neighbors(tile) {
+                    if let Hint {
+                        ref mut remaining_mines,
+                        ref mut empties,
+                        ..
+                    } = self.grid[n]
+                    {
+                        *remaining_mines += 1;
+                        *empties += 1;
+                    }
                 }
-            },
+            }
             Empty => {}
         }
         self.grid[tile] = Empty;

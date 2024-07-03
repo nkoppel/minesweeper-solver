@@ -1,3 +1,4 @@
+use crate::bitset::BitSet;
 use crate::board::*;
 use crate::game::*;
 
@@ -107,7 +108,7 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
             } => {
                 *needs_propogate = false;
                 Some(true)
-            },
+            }
 
             Hint { .. } if tile.needs_hint_fill() => {
                 for n in neighbors {

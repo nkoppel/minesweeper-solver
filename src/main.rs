@@ -1,4 +1,5 @@
 #![feature(portable_simd)]
+#![feature(core_intrinsics)]
 #![allow(dead_code)]
 
 mod game;
@@ -9,6 +10,7 @@ mod solver3;
 
 mod bitset;
 mod board;
+mod padded_zip;
 mod solution_set;
 mod solver_struct;
 
@@ -78,7 +80,7 @@ fn main() {
         let mut solver = solver_struct::Solver::from_game(game);
         solver.uncover_tile(0).unwrap();
         solver.propogate(&mut vec![0]).unwrap();
-        // solver.solve().unwrap();
+        solver.solve().unwrap();
     }
 
     // println!("{:x?}", solver);

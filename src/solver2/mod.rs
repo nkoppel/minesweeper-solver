@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use ibig::UBig;
 use itertools::Itertools;
 
 mod bitset;

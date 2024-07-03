@@ -118,14 +118,10 @@ impl<G: Graph> Board<G> {
             match self.grid[n] {
                 Mine { .. } => mines += 1,
                 Empty => empties += 1,
+                Hint {
+                    ref mut empties, ..
+                } => *empties -= 1,
                 _ => {}
-            }
-
-            if let Hint {
-                ref mut empties, ..
-            } = self.grid[n]
-            {
-                *empties -= 1;
             }
         }
 
@@ -159,25 +155,29 @@ impl<G: Graph> Board<G> {
 
     pub fn clear_tile(&mut self, tile: usize) {
         match self.grid[tile] {
-            Hint { .. } | AssertHint { .. } => for n in self.graph.neighbors(tile) {
-                if let Hint {
-                    ref mut empties, ..
-                } = self.grid[n]
-                {
-                    *empties += 1;
+            Hint { .. } | AssertHint { .. } => {
+                for n in self.graph.neighbors(tile) {
+                    if let Hint {
+                        ref mut empties, ..
+                    } = self.grid[n]
+                    {
+                        *empties += 1;
+                    }
                 }
-            },
-            Mine { .. } => for n in self.graph.neighbors(tile) {
-                if let Hint {
-                    ref mut remaining_mines,
-                    ref mut empties,
-                    ..
-                } = self.grid[n]
-                {
-                    *remaining_mines += 1;
-                    *empties += 1;
+            }
+            Mine { .. } => {
+                for n in self.graph.neighbors(tile) {
+                    if let Hint {
+                        ref mut remaining_mines,
+                        ref mut empties,
+                        ..
+                    } = self.grid[n]
+                    {
+                        *remaining_mines += 1;
+                        *empties += 1;
+                    }
                 }
-            },
+            }
             Empty => {}
         }
         self.grid[tile] = Empty;

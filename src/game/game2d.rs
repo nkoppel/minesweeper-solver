@@ -66,7 +66,8 @@ impl Graph for Graph2d {
         let size = (self.width, self.height);
         let pos2d = (pos % self.width, pos / self.width);
 
-        valid_neighbors_2d(self.neighbors.iter().copied(), size, pos2d).map(|(x, y)| x + y * self.width)
+        valid_neighbors_2d(self.neighbors.iter().copied(), size, pos2d)
+            .map(|(x, y)| x + y * self.width)
     }
 }
 
