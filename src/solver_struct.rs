@@ -1,4 +1,5 @@
-use crate::bitset::BitSet;
+use itertools::Itertools;
+
 use crate::board::*;
 use crate::game::*;
 
@@ -159,9 +160,7 @@ impl<Ga: Game<Graph = Graph2d>> Solver<Graph2d, Ga> {
             .board
             .grid
             .iter()
-            .enumerate()
-            .filter(|(_, tile)| tile.needs_propogate())
-            .map(|(i, _)| i)
+            .positions(|tile| tile.needs_propogate())
             .collect();
 
         loop {

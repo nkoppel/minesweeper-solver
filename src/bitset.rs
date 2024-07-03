@@ -125,6 +125,12 @@ impl BitSet {
     pub fn is_subset_of(&self, other: &Self) -> bool {
         self.bits.iter().zip(&other.bits).all(|(a, b)| a & b == *a)
     }
+
+    pub fn first_n_ones(&self, num_ones: usize) -> Self {
+        let mut out = Self::empty(self.bits());
+        out.extend(self.iter_ones().take(num_ones));
+        out
+    }
 }
 
 // Should hopefully compile down into intrinsics

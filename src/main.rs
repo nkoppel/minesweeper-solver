@@ -47,41 +47,55 @@ fn generate_game() -> InternalGame<Graph2d> {
 }
 
 fn main() {
-    // let mut game = InternalGame::from_grid(bitvec::bitvec![usize, bitvec::order::Lsb0; 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1], Graph2d::new(4, 4, &MOORE_NEIGHBORHOOD));
+    let mut board = crate::board::Board::new(Graph2d::new(30, 16, &MOORE_NEIGHBORHOOD), 99);
+    board.set_tile(0, 0);
+    board.set_tile(1, 1);
+    board.set_tile(30, 1);
+    board.set_tile(31, 2);
+    board.set_tile(62, 1);
 
-    for i in 0..100000 {
-        println!("{i}");
-        let mut game = generate_game();
-        // let game = InternalGame::from_grid(
-        // bitvec::bitvec![usize, bitvec::order::Lsb0;
-        // 0,0,0,0,0,0,1,1,
-        // 0,0,0,0,0,0,0,1,
-        // 0,1,0,0,0,1,0,0,
-        // 0,1,0,0,0,0,0,0,
-        // 0,0,0,0,0,0,1,0,
-        // 0,0,1,0,0,0,1,0,
-        // 0,0,0,0,0,0,0,0,
-        // 1,0,0,0,0,0,0,0,
-        // ],
-        // Graph2d::new(8, 8, &MOORE_NEIGHBORHOOD),
-        // );
+    board.set_tile(29, 0);
+    board.set_tile(28, 1);
+    board.set_tile(59, 1);
+    board.set_tile(58, 2);
+    board.set_tile(87, 2);
 
-        // let mut solver = MineArrangements::from_game(&game);
-        // solver.add_constraint_with_game(0, &mut game).unwrap();
-        // println!("{game}");
-        // solver.play_game(&mut game);
+    println!("{board}");
 
-        // let mut board = Board::from_game(&game);
-        // let mut solver = Solver::new(&mut board, &mut game);
+    print_probs_2d(&board.solutionset().tile_safe_probability(), 30);
+
+    // for i in 0..100000 {
+        // println!("{i}");
+        // let mut game = generate_game();
+        // // let game = InternalGame::from_grid(
+        // // bitvec::bitvec![usize, bitvec::order::Lsb0;
+        // // 0,0,0,0,0,0,1,1,
+        // // 0,0,0,0,0,0,0,1,
+        // // 0,1,0,0,0,1,0,0,
+        // // 0,1,0,0,0,0,0,0,
+        // // 0,0,0,0,0,0,1,0,
+        // // 0,0,1,0,0,0,1,0,
+        // // 0,0,0,0,0,0,0,0,
+        // // 1,0,0,0,0,0,0,0,
+        // // ],
+        // // Graph2d::new(8, 8, &MOORE_NEIGHBORHOOD),
+        // // );
+
+        // // let mut solver = MineArrangements::from_game(&game);
+        // // solver.add_constraint_with_game(0, &mut game).unwrap();
+        // // println!("{game}");
+        // // solver.play_game(&mut game);
+
+        // // let mut board = Board::from_game(&game);
+        // // let mut solver = Solver::new(&mut board, &mut game);
+        // // solver.uncover_tile(0).unwrap();
+        // // solver.propogate(&mut vec![0]);
+        // // solver.solve_csp();
+
+        // let mut solver = solver_struct::Solver::from_game(game);
         // solver.uncover_tile(0).unwrap();
-        // solver.propogate(&mut vec![0]);
-        // solver.solve_csp();
-
-        let mut solver = solver_struct::Solver::from_game(game);
-        solver.uncover_tile(0).unwrap();
-        solver.propogate(&mut vec![0]).unwrap();
-        solver.solve().unwrap();
-    }
+        // solver.solve().unwrap();
+    // }
 
     // println!("{:x?}", solver);
 
