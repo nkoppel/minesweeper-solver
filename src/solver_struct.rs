@@ -90,14 +90,13 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
             return Some(());
         }
 
-        let hint = self.game.explore_tile(tile)?;
-        self.board.set_tile(tile, hint);
+        self.board.set_tile(tile, self.game.explore_tile(tile)?);
 
         Some(())
     }
 
     #[must_use]
-    fn propogate_tile(&mut self, loc: usize, neighbors: &[usize]) -> Option<bool> {
+    fn propogate_tile(&mut self, loc: usize, graph: &Gr) -> Option<bool> {
         let tile = &mut self.board.grid[loc];
 
         match tile {
@@ -112,14 +111,14 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
             }
 
             Hint { .. } if tile.needs_hint_fill() => {
-                for n in neighbors {
-                    self.uncover_tile(*n)?;
+                for loc in graph.neighbors(loc) {
+                    self.uncover_tile(loc)?;
                 }
                 Some(true)
             }
             Hint { .. } if tile.needs_flag_fill() => {
-                for n in neighbors {
-                    self.board.flag_tile(*n);
+                for loc in graph.neighbors(loc) {
+                    self.board.flag_tile(loc);
                 }
                 Some(true)
             }
@@ -127,25 +126,20 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
             _ => Some(false),
         }
     }
-}
 
-impl<Ga: Game<Graph = Graph2d>> Solver<Graph2d, Ga> {
     #[must_use]
     pub fn propogate(&mut self, tiles: &mut Vec<usize>) -> Option<()> {
         let stack = tiles;
-        let mut neighbors = Vec::with_capacity(8);
+        let graph = self.graph().clone();
 
         while let Some(loc) = stack.last().copied() {
-            neighbors.clear();
-            neighbors.extend(self.board.neighbors(loc));
+            self.propogate_tile(loc, &graph)?;
 
-            self.propogate_tile(loc, &neighbors)?;
-
-            if let Some(next) = neighbors
-                .iter()
-                .find(|n| self.board.grid[**n].needs_propogate())
+            if let Some(next) = graph
+                .neighbors(loc)
+                .find(|n| self.board.grid[*n].needs_propogate())
             {
-                stack.push(*next);
+                stack.push(next);
             } else {
                 stack.pop();
             }
