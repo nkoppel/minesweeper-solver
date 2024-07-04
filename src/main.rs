@@ -3,10 +3,10 @@
 #![allow(dead_code)]
 
 mod game;
-mod search;
-mod solver;
-mod solver2;
-mod solver3;
+// mod search;
+// mod solver;
+// mod solver2;
+// mod solver3;
 
 mod bitset;
 mod board;
@@ -16,9 +16,9 @@ mod solver_struct;
 
 pub use crate::game::*;
 // pub use crate::search::*;
-pub use crate::solver::*;
+// pub use crate::solver::*;
 // pub use crate::solver2::*;
-pub use crate::solver3::*;
+// pub use crate::solver3::*;
 
 pub(crate) fn print_probs_2d(probs: &[f64], width: usize) {
     for (i, prob) in probs.iter().enumerate() {

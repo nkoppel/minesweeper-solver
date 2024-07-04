@@ -35,10 +35,9 @@ impl BitSet {
         }
     }
 
-    #[allow(clippy::implied_bounds_in_impls)]
     pub fn iter_ones(
         &self,
-    ) -> impl Iterator<Item = usize> + DoubleEndedIterator + FusedIterator + Clone + '_ {
+    ) -> impl DoubleEndedIterator<Item = usize> + FusedIterator + Clone + '_ {
         self.slice_view()
             .iter()
             .enumerate()
@@ -51,6 +50,14 @@ impl BitSet {
 
     pub fn last_one(&self) -> Option<usize> {
         self.iter_ones().next_back()
+    }
+
+    pub fn iter(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = bool> + FusedIterator + Clone + '_ {
+        self.slice_view()
+            .iter()
+            .flat_map(|x| (0..64).map(move |i| x & (1 << i) != 0))
     }
 
     fn combine(&self, other: &Self, f: impl Fn(u64x8, u64x8) -> u64x8) -> Self {
@@ -124,6 +131,12 @@ impl BitSet {
 
     pub fn is_subset_of(&self, other: &Self) -> bool {
         self.bits.iter().zip(&other.bits).all(|(a, b)| a & b == *a)
+    }
+
+    pub fn from_iter(iter: impl Iterator<Item = usize>, bits: usize) -> Self {
+        let mut out = Self::empty(bits);
+        out.extend(iter);
+        out
     }
 
     pub fn first_n_ones(&self, num_ones: usize) -> Self {
@@ -237,6 +250,18 @@ impl<'a> Extend<&'a usize> for BitSet {
     fn extend<T: IntoIterator<Item = &'a usize>>(&mut self, iter: T) {
         for i in iter.into_iter().copied() {
             self.set_to_one(i);
+        }
+    }
+}
+
+impl Index<usize> for BitSet {
+    type Output = bool;
+
+    fn index(&self, index: usize) -> &'static bool {
+        if self.get(index) {
+            &true
+        } else {
+            &false
         }
     }
 }

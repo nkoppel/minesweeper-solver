@@ -1,9 +1,10 @@
-use bitvec::prelude::*;
 use rand::prelude::*;
 
 mod game2d;
 
 pub use game2d::*;
+
+use crate::bitset::BitSet;
 
 pub trait Graph: Clone + PartialEq + Eq {
     fn neighbors(&self, pos: usize) -> impl Iterator<Item = usize> + '_;
@@ -54,7 +55,7 @@ pub enum StartType {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InternalGame<G: Graph> {
-    pub grid: Option<BitVec>,
+    pub grid: Option<BitSet>,
     start_type: StartType,
     num_mines: usize,
     graph: G,
@@ -77,7 +78,7 @@ impl<G: Graph> InternalGame<G> {
         Self::new(game.num_mines(), start_type, game.graph().clone())
     }
 
-    pub fn from_grid(grid: BitVec, graph: G) -> Self {
+    pub fn from_grid(grid: BitSet, graph: G) -> Self {
         Self {
             num_mines: grid.count_ones(),
             grid: Some(grid),
@@ -86,7 +87,7 @@ impl<G: Graph> InternalGame<G> {
         }
     }
 
-    fn explore_tile_inner(&self, grid: &BitVec, pos: usize) -> Option<u8> {
+    fn explore_tile_inner(&self, grid: &BitSet, pos: usize) -> Option<u8> {
         if grid[pos] {
             return None;
         }
@@ -100,8 +101,7 @@ impl<G: Graph> InternalGame<G> {
         Some(count)
     }
 
-    fn generate_grid(&self, pos: usize) -> BitVec {
-        let mut out = bitvec![usize, Lsb0; 0; self.num_tiles()];
+    fn generate_grid(&self, pos: usize) -> BitSet {
         let mut safe: Vec<usize> = Vec::new();
 
         match self.start_type {
@@ -122,11 +122,7 @@ impl<G: Graph> InternalGame<G> {
 
         let (mines, _) = allowed.partial_shuffle(&mut thread_rng(), self.num_mines);
 
-        for i in mines {
-            out.set(*i, true);
-        }
-
-        out
+        BitSet::from_iter(mines.iter().copied(), self.num_tiles())
     }
 }
 

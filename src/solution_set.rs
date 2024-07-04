@@ -238,8 +238,7 @@ impl<G: Graph> Board<G> {
                 ..
             } = tile
             {
-                let mut group_set = BitSet::empty(self.num_tiles());
-                group_set.extend(self.neighbors(i).filter_map(|j| cell_groups[j]));
+                let group_set = BitSet::from_iter(self.neighbors(i).filter_map(|j| cell_groups[j]), self.num_tiles());
 
                 sub_solutions.push(ArrangementSet::new(&groups, &group_set, *mines as usize));
             }

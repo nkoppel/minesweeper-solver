@@ -12,7 +12,5 @@ edition = "2021"
 getrandom = { version = "0.2", features = ["js"] }
 rand = "0.8"
 smallvec = { version = "1.10", features = ["union"] }
-bitvec = "1"
-ibig = { version = "0.3", features = ["rand"] }
 itertools = "0.13"
 malachite = "0.4"

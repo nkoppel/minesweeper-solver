@@ -27,19 +27,6 @@ pub const KNIGHT_NEIGHBORHOOD: [(isize, isize); 8] =
                (-1,  2),   ( 1,  2),
     ];
 
-fn valid_neighbors_2d(
-    neighbors: impl Iterator<Item = (isize, isize)>,
-    (w, h): (usize, usize),
-    (x, y): (usize, usize),
-) -> impl Iterator<Item = (usize, usize)> {
-    neighbors.filter_map(move |(xi, yi)| {
-        let x2 = (x as isize + xi) as usize;
-        let y2 = (y as isize + yi) as usize;
-
-        (x2 < w && y2 < h).then_some((x2, y2))
-    })
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Graph2d {
     width: usize,
@@ -63,11 +50,15 @@ impl Graph for Graph2d {
     }
 
     fn neighbors(&self, pos: usize) -> impl Iterator<Item = usize> + '_ {
-        let size = (self.width, self.height);
-        let pos2d = (pos % self.width, pos / self.width);
+        let x = pos % self.width;
+        let y = pos / self.width;
 
-        valid_neighbors_2d(self.neighbors.iter().copied(), size, pos2d)
-            .map(|(x, y)| x + y * self.width)
+        self.neighbors.iter().filter_map(move |(xi, yi)| {
+            let x2 = (x as isize + xi) as usize;
+            let y2 = (y as isize + yi) as usize;
+
+            (x2 < self.width && y2 < self.height).then_some(x2 + y2 * self.width)
+        })
     }
 }
 
@@ -77,8 +68,8 @@ impl fmt::Display for InternalGame<Graph2d> {
             return write!(f, "None");
         };
 
-        for (i, c) in grid.iter().enumerate() {
-            if *c {
+        for (i, c) in grid.iter().take(self.graph.num_tiles()).enumerate() {
+            if c {
                 write!(f, "* ")?;
             } else {
                 write!(f, ". ")?;

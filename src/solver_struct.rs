@@ -96,7 +96,7 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
     }
 
     #[must_use]
-    fn propogate_tile(&mut self, loc: usize, graph: &Gr) -> Option<bool> {
+    fn propogate_tile(&mut self, loc: usize, graph: &Gr) -> Option<()> {
         let tile = &mut self.board.grid[loc];
 
         match tile {
@@ -107,24 +107,23 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
                 needs_propogate: ref mut needs_propogate @ true,
             } => {
                 *needs_propogate = false;
-                Some(true)
             }
 
             Hint { .. } if tile.needs_hint_fill() => {
                 for loc in graph.neighbors(loc) {
                     self.uncover_tile(loc)?;
                 }
-                Some(true)
             }
             Hint { .. } if tile.needs_flag_fill() => {
                 for loc in graph.neighbors(loc) {
                     self.board.flag_tile(loc);
                 }
-                Some(true)
             }
 
-            _ => Some(false),
+            _ => {}
         }
+
+        Some(())
     }
 
     #[must_use]
