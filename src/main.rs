@@ -10,9 +10,8 @@ mod game;
 
 mod bitset;
 mod board;
-mod padded_zip;
 mod solution_set;
-mod solver_struct;
+mod solver;
 
 pub use crate::game::*;
 // pub use crate::search::*;
@@ -22,12 +21,17 @@ pub use crate::game::*;
 
 pub(crate) fn print_probs_2d(probs: &[f64], width: usize) {
     for (i, prob) in probs.iter().enumerate() {
-        print!("{prob:5.3} ");
+        if *prob == 1. {
+            print!("## ");
+        } else {
+            print!("{:2} ", (prob * 100.).round());
+        }
 
         if i % width == width - 1 {
             println!()
         }
     }
+    println!()
 }
 
 // fn generate_game() -> InternalGame<Graph2d> {
@@ -47,22 +51,22 @@ fn generate_game() -> InternalGame<Graph2d> {
 }
 
 fn main() {
-    // let mut board = crate::board::Board::new(Graph2d::new(30, 16, &MOORE_NEIGHBORHOOD), 99);
+    // let mut board = crate::board::Board::new(Graph2d::new(8, 8, &MOORE_NEIGHBORHOOD), 10);
     // board.set_tile(0, 0);
     // board.set_tile(1, 1);
-    // board.set_tile(30, 1);
-    // board.set_tile(31, 2);
-    // board.set_tile(62, 1);
+    // board.set_tile(8, 1);
+    // board.set_tile(9, 2);
 
-    // board.set_tile(29, 0);
-    // board.set_tile(28, 1);
-    // board.set_tile(59, 1);
-    // board.set_tile(58, 2);
-    // board.set_tile(87, 2);
+    // let solution_set = board.solutionset();
+
+    // board.set_tile(18, 1);
+
+    // let solution_set_2 = solution_set.increment(&board);
 
     // println!("{board}");
 
-    // print_probs_2d(&board.solutionset().tile_safe_probability(), 30);
+    // print_probs_2d(&solution_set.tile_safe_probability(), 8);
+    // print_probs_2d(&solution_set_2.tile_safe_probability(), 8);
 
     for i in 0..100000 {
         println!("{i}");
@@ -92,7 +96,7 @@ fn main() {
         // solver.propogate(&mut vec![0]);
         // solver.solve_csp();
 
-        let mut solver = solver_struct::Solver::from_game(game);
+        let mut solver = solver::Solver::from_game(game);
         solver.uncover_tile(0).unwrap();
         solver.solve().unwrap();
     }

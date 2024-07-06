@@ -1,11 +1,12 @@
 use itertools::Itertools;
-use malachite::{
-    num::{arithmetic::traits::Factorial, conversion::traits::RoundingInto},
-    rounding_modes::RoundingMode,
-    Natural, Rational,
-};
 
 use crate::{bitset::BitSet, board::*, game::*};
+
+mod combinations_iter;
+mod incremental;
+mod solution_counting;
+
+use combinations_iter::CombinationsIter;
 
 #[derive(Clone, Debug)]
 struct ArrangementSet {
@@ -21,103 +22,6 @@ pub struct MineArrangements {
     mask: BitSet,
     remaining_mines: usize,
     num_tiles: usize,
-}
-
-struct CombinationsIter<'a> {
-    groups: &'a [BitSet],
-    group_set: &'a BitSet,
-    next: Option<BitSet>,
-}
-
-fn n_choose_k(n: usize, k1: usize) -> usize {
-    let k2 = n - k1;
-    let (k1, k2) = (k1.min(k2), k1.max(k2));
-
-    let f_k1 = (1..=k1).product::<usize>();
-    let f_k2 = f_k1 * (k1 + 1..=k2).product::<usize>();
-    let f_n = f_k2 * (k2 + 1..=n).product::<usize>();
-
-    f_n / (f_k1 * f_k2)
-}
-
-fn n_choose_k_natural(n: u64, k: u64) -> Natural {
-    Natural::factorial(n) / (Natural::factorial(k) * Natural::factorial(n - k))
-}
-
-fn fill_front(
-    groups: &[BitSet],
-    group_set: &BitSet,
-    combination: &mut BitSet,
-    mut num_ones: usize,
-) {
-    for group in group_set.iter_ones().map(|g| &groups[g]) {
-        let group_size = group.count_ones();
-
-        if group_size >= num_ones {
-            *combination += group.first_n_ones(num_ones);
-            break;
-        }
-
-        *combination += group;
-        num_ones -= group_size;
-    }
-}
-
-fn next_combination(
-    groups: &[BitSet],
-    group_set: &BitSet,
-    mut combination: BitSet,
-) -> Option<BitSet> {
-    let mut group_iter = group_set.iter_ones();
-
-    let start_group = loop {
-        let group = &groups[group_iter.next()?];
-
-        if combination.overlaps_with(group) {
-            break group;
-        }
-    };
-
-    let mut zeroed_count = start_group.count_overlap_ones(&combination);
-    combination -= start_group;
-
-    for group_idx in group_iter {
-        let group = &groups[group_idx];
-
-        if !group.is_subset_of(&combination) {
-            let ones = combination.count_overlap_ones(group);
-            combination.set_to_one(group.iter_ones().nth(ones).unwrap());
-            fill_front(groups, group_set, &mut combination, zeroed_count - 1);
-            return Some(combination);
-        }
-
-        zeroed_count += combination.count_overlap_ones(group);
-        combination -= group;
-    }
-
-    None
-}
-
-impl<'a> CombinationsIter<'a> {
-    fn new(groups: &'a [BitSet], group_set: &'a BitSet, num: usize) -> Self {
-        let mut next = BitSet::empty(groups[0].bits());
-        fill_front(groups, group_set, &mut next, num);
-
-        Self {
-            groups,
-            group_set,
-            next: Some(next),
-        }
-    }
-}
-
-impl Iterator for CombinationsIter<'_> {
-    type Item = BitSet;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next = next_combination(self.groups, self.group_set, self.next.clone()?);
-        std::mem::replace(&mut self.next, next)
-    }
 }
 
 impl ArrangementSet {
@@ -203,7 +107,25 @@ impl<G: Graph> Board<G> {
 
         out
     }
+}
 
+fn bitset_groups(cell_groups: &[Option<usize>]) -> Vec<BitSet> {
+    let mut groups = Vec::with_capacity(64);
+
+    for (i, group) in cell_groups.iter().enumerate() {
+        let Some(group) = group else { continue };
+
+        if *group >= groups.len() {
+            groups.resize_with(group + 1, || BitSet::empty(cell_groups.len()));
+        }
+
+        groups[*group].set_to_one(i);
+    }
+
+    groups
+}
+
+impl<G: Graph> Board<G> {
     pub fn all_empties(&self) -> BitSet {
         let mut out = BitSet::empty(self.num_tiles());
 
@@ -216,33 +138,36 @@ impl<G: Graph> Board<G> {
         out
     }
 
+    #[inline(always)]
+    fn new_arrangement_set(
+        &self,
+        loc: usize,
+        groups: &[BitSet],
+        cell_groups: &[Option<usize>],
+    ) -> Option<ArrangementSet> {
+        let Hint {
+            remaining_mines: mines @ 1..,
+            ..
+        } = self.grid[loc]
+        else {
+            return None;
+        };
+
+        let group_set = BitSet::from_iter(
+            self.neighbors(loc).filter_map(|j| cell_groups[j]),
+            self.num_tiles(),
+        );
+
+        Some(ArrangementSet::new(groups, &group_set, mines as usize))
+    }
+
     fn initial_solutionset(&self) -> MineArrangements {
         let cell_groups = self.cell_groups();
-        let mut groups = Vec::with_capacity(64);
+        let groups = bitset_groups(&cell_groups);
 
-        for (i, group) in cell_groups.iter().enumerate() {
-            let Some(group) = group else { continue };
-
-            if *group >= groups.len() {
-                groups.resize_with(group + 1, || BitSet::empty(self.num_tiles()));
-            }
-
-            groups[*group].set_to_one(i);
-        }
-
-        let mut sub_solutions: Vec<ArrangementSet> = Vec::new();
-
-        for (i, tile) in self.grid.iter().enumerate() {
-            if let Hint {
-                remaining_mines: mines @ 1..,
-                ..
-            } = tile
-            {
-                let group_set = BitSet::from_iter(self.neighbors(i).filter_map(|j| cell_groups[j]), self.num_tiles());
-
-                sub_solutions.push(ArrangementSet::new(&groups, &group_set, *mines as usize));
-            }
-        }
+        let sub_solutions: Vec<ArrangementSet> = (0..self.grid.len())
+            .filter_map(|i| self.new_arrangement_set(i, &groups, &cell_groups))
+            .collect();
 
         MineArrangements {
             groups,
@@ -377,67 +302,6 @@ impl ArrangementSet {
         self.arrangements
             .retain(|arrangement| summary.get(arrangement.count_ones()))
     }
-
-    fn count_subsolutions(&self, groups: &[BitSet], group_sizes: &[usize]) -> Vec<(usize, usize)> {
-        let mut counts = vec![0; self.mask.count_ones() + 1];
-
-        for arrangement in &self.arrangements {
-            let count: usize = self
-                .groups
-                .iter_ones()
-                .map(|group| {
-                    let group_mines = groups[group].count_overlap_ones(arrangement);
-                    let group_size = group_sizes[group];
-                    n_choose_k(group_size, group_mines)
-                })
-                .product();
-
-            counts[arrangement.count_ones()] += count;
-        }
-
-        counts
-            .into_iter()
-            .enumerate()
-            .filter(|(_, x)| *x > 0)
-            .collect()
-    }
-
-    fn count_tile_safes(
-        &self,
-        groups: &[BitSet],
-        group_sizes: &[usize],
-    ) -> Vec<(usize, Vec<usize>)> {
-        let mut counts = vec![vec![0; self.mask.bits()]; self.mask.bits() + 1];
-
-        for arrangement in &self.arrangements {
-            let count: usize = self
-                .groups
-                .iter_ones()
-                .map(|group| {
-                    let group_mines = groups[group].count_overlap_ones(arrangement);
-                    let group_size = group_sizes[group];
-                    n_choose_k(group_size, group_mines)
-                })
-                .product();
-
-            let total_mines = arrangement.count_ones();
-
-            for group in self.groups.iter_ones() {
-                let group_mines = groups[group].count_overlap_ones(arrangement);
-                let group_size = group_sizes[group];
-
-                for tile in groups[group].iter_ones() {
-                    counts[total_mines][tile] += count * (group_size - group_mines) / group_size;
-                }
-            }
-        }
-
-        counts
-            .into_iter()
-            .enumerate()
-            .filter(|(_, grid)| grid.iter().any(|c| *c > 0))
-            .collect()
-    }
 }
 
 impl MineArrangements {
@@ -524,92 +388,5 @@ impl MineArrangements {
         for (arrangement, summary) in self.sub_arrangements.iter_mut().zip(valid_summaries) {
             arrangement.retain_with_summary(&summary);
         }
-    }
-
-    pub fn total_solutions(&self) -> Natural {
-        let group_sizes = self.groups.iter().map(BitSet::count_ones).collect_vec();
-        let num_unconstrained = self.uncontrained_empties().count_ones();
-
-        self.sub_arrangements
-            .iter()
-            .map(|sa| sa.count_subsolutions(&self.groups, &group_sizes))
-            .multi_cartesian_product()
-            .map(|counts| {
-                let unconstrained_mines =
-                    self.remaining_mines - counts.iter().map(|x| x.0).sum::<usize>();
-
-                let constrained_solutions: Natural =
-                    counts.iter().map(|x| Natural::from(x.1)).product();
-                let unconstrained_solutions =
-                    n_choose_k_natural(num_unconstrained as u64, unconstrained_mines as u64);
-
-                constrained_solutions * unconstrained_solutions
-            })
-            .sum()
-    }
-
-    pub fn tile_safe_solutions(&self) -> Vec<Natural> {
-        let group_sizes = self.groups.iter().map(BitSet::count_ones).collect_vec();
-        let num_unconstrained = self.uncontrained_empties().count_ones();
-
-        let subsolution_info: Vec<Vec<(usize, usize, Vec<usize>)>> = self
-            .sub_arrangements
-            .iter()
-            .map(|sa| {
-                let counts = sa.count_subsolutions(&self.groups, &group_sizes);
-                let tile_mine_counts = sa.count_tile_safes(&self.groups, &group_sizes);
-
-                counts
-                    .into_iter()
-                    .zip(tile_mine_counts)
-                    .map(|((i, count), (_, tile_mines))| (i, count, tile_mines))
-                    .collect()
-            })
-            .collect();
-
-        let mut out = vec![Natural::from(0u32); self.num_tiles];
-        let mut unconstrained_count = Natural::from(0u32);
-
-        for counts in subsolution_info.iter().multi_cartesian_product() {
-            let unconstrained_mines =
-                self.remaining_mines - counts.iter().map(|x| x.0).sum::<usize>();
-
-            let unconstrained_solutions =
-                n_choose_k_natural(num_unconstrained as u64, unconstrained_mines as u64);
-            let constrained_solutions: Natural =
-                counts.iter().map(|x| Natural::from(x.1)).product();
-
-            let total_solutions = &unconstrained_solutions * &constrained_solutions;
-
-            for (_, solutions, counts) in counts {
-                for (c1, c2) in out.iter_mut().zip(counts) {
-                    *c1 += &total_solutions * Natural::from(*c2) / Natural::from(*solutions);
-                }
-            }
-
-            unconstrained_count += total_solutions
-                * Natural::from(num_unconstrained - unconstrained_mines)
-                / Natural::from(num_unconstrained);
-        }
-
-        for tile in self.uncontrained_empties().iter_ones() {
-            out[tile] = unconstrained_count.clone();
-        }
-
-        out
-    }
-
-    pub fn tile_safe_probability(&self) -> Vec<f64> {
-        let solutions = self.tile_safe_solutions();
-        let total_solutions = self.total_solutions();
-
-        solutions
-            .iter()
-            .map(|sol| {
-                Rational::from_naturals_ref(sol, &total_solutions)
-                    .rounding_into(RoundingMode::Nearest)
-                    .0
-            })
-            .collect()
     }
 }

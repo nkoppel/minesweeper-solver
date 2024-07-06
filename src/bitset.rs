@@ -35,9 +35,7 @@ impl BitSet {
         }
     }
 
-    pub fn iter_ones(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = usize> + FusedIterator + Clone + '_ {
+    pub fn iter_ones(&self) -> impl DoubleEndedIterator<Item = usize> + FusedIterator + Clone + '_ {
         self.slice_view()
             .iter()
             .enumerate()
@@ -52,9 +50,7 @@ impl BitSet {
         self.iter_ones().next_back()
     }
 
-    pub fn iter(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = bool> + FusedIterator + Clone + '_ {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = bool> + FusedIterator + Clone + '_ {
         self.slice_view()
             .iter()
             .flat_map(|x| (0..64).map(move |i| x & (1 << i) != 0))

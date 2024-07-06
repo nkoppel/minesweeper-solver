@@ -57,7 +57,7 @@ impl Graph for Graph2d {
             let x2 = (x as isize + xi) as usize;
             let y2 = (y as isize + yi) as usize;
 
-            (x2 < self.width && y2 < self.height).then_some(x2 + y2 * self.width)
+            (x2 < self.width && y2 < self.height).then(|| x2 + y2 * self.width)
         })
     }
 }
