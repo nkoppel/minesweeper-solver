@@ -96,7 +96,7 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
     }
 
     #[must_use]
-    fn propogate_tile(&mut self, loc: usize, graph: &Gr) -> Option<()> {
+    fn propogate_tile(&mut self, loc: usize, graph: &Gr) -> Option<bool> {
         let tile = &mut self.board.grid[loc];
 
         match tile {
@@ -107,23 +107,24 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
                 needs_propogate: ref mut needs_propogate @ true,
             } => {
                 *needs_propogate = false;
+                Some(true)
             }
 
             Hint { .. } if tile.needs_hint_fill() => {
                 for loc in graph.neighbors(loc) {
                     self.uncover_tile(loc)?;
                 }
+                Some(true)
             }
             Hint { .. } if tile.needs_flag_fill() => {
                 for loc in graph.neighbors(loc) {
                     self.board.flag_tile(loc);
                 }
+                Some(true)
             }
 
-            _ => {}
+            _ => Some(false),
         }
-
-        Some(())
     }
 
     #[must_use]
@@ -131,16 +132,9 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
         let stack = tiles;
         let graph = self.graph().clone();
 
-        while let Some(loc) = stack.last().copied() {
-            self.propogate_tile(loc, &graph)?;
-
-            if let Some(next) = graph
-                .neighbors(loc)
-                .find(|n| self.board.grid[*n].needs_propogate())
-            {
-                stack.push(next);
-            } else {
-                stack.pop();
+        while let Some(loc) = stack.pop() {
+            if self.propogate_tile(loc, &graph)? {
+                stack.extend(graph.neighbors(loc));
             }
         }
 

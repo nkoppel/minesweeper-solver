@@ -1,8 +1,10 @@
 use rand::prelude::*;
 
 mod game2d;
+mod precomputed_graph;
 
 pub use game2d::*;
+pub use precomputed_graph::*;
 
 use crate::bitset::BitSet;
 

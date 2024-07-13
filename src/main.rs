@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 mod game;
-// mod search;
+mod search;
 // mod solver;
 // mod solver2;
 // mod solver3;
@@ -14,7 +14,7 @@ mod solution_set;
 mod solver;
 
 pub use crate::game::*;
-// pub use crate::search::*;
+pub use crate::search::*;
 // pub use crate::solver::*;
 // pub use crate::solver2::*;
 // pub use crate::solver3::*;
@@ -56,6 +56,24 @@ fn main() {
     // board.set_tile(1, 1);
     // board.set_tile(8, 1);
     // board.set_tile(9, 2);
+    // board.set_tile(18, 1);
+
+    // println!("{board}");
+    // let solution_set = board.solutionset();
+    // print_probs_2d(&solution_set.tile_safe_probability(), 8);
+
+    // // let best_move = best_move(&board, 10000);
+    // let best_move = board.best_move_safes().unwrap();
+    // println!("{best_move}");
+
+    // board.assert_tile(best_move);
+
+    // println!("{board}");
+
+    // println!("{:?}", board.solutionset().total_solutions());
+    // println!("{:?}", board.solutionset().total_solutions());
+    // board.set_tile(27, 1);
+    // println!("{:?}", board.solutionset().total_solutions());
 
     // let solution_set = board.solutionset();
 

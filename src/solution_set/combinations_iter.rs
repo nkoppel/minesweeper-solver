@@ -62,7 +62,7 @@ fn next_combination(
 
 impl<'a> CombinationsIter<'a> {
     pub fn new(groups: &'a [BitSet], group_set: &'a BitSet, num: usize) -> Self {
-        let mut next = BitSet::empty(groups[0].bits());
+        let mut next = BitSet::empty(group_set.bits());
         fill_front(groups, group_set, &mut next, num);
 
         Self {

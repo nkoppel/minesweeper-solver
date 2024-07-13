@@ -6,33 +6,25 @@ use malachite::{
     Natural, Rational,
 };
 
-fn n_choose_k(n: usize, k1: usize) -> usize {
-    let k2 = n - k1;
-    let (k1, k2) = (k1.min(k2), k1.max(k2));
-
-    let f_k1 = (1..=k1).product::<usize>();
-    let f_k2 = f_k1 * (k1 + 1..=k2).product::<usize>();
-    let f_n = f_k2 * (k2 + 1..=n).product::<usize>();
-
-    f_n / (f_k1 * f_k2)
-}
-
-fn n_choose_k_natural(n: u64, k: u64) -> Natural {
-    Natural::factorial(n) / (Natural::factorial(k) * Natural::factorial(n - k))
+fn n_choose_k<T>(n: u64, k: u64) -> T
+where
+    T: Factorial + std::ops::Mul<Output = T> + std::ops::Div<Output = T>,
+{
+    T::factorial(n) / (T::factorial(k) * T::factorial(n - k))
 }
 
 impl ArrangementSet {
-    fn count_subsolutions(&self, groups: &[BitSet], group_sizes: &[usize]) -> Vec<(usize, usize)> {
+    fn count_subsolutions(&self, groups: &[BitSet], group_sizes: &[usize]) -> Vec<(usize, u64)> {
         let mut counts = vec![0; self.mask.count_ones() + 1];
 
         for arrangement in &self.arrangements {
-            let count: usize = self
+            let count: u64 = self
                 .groups
                 .iter_ones()
                 .map(|group| {
                     let group_mines = groups[group].count_overlap_ones(arrangement);
                     let group_size = group_sizes[group];
-                    n_choose_k(group_size, group_mines)
+                    n_choose_k::<u64>(group_size as u64, group_mines as u64)
                 })
                 .product();
 
@@ -50,17 +42,18 @@ impl ArrangementSet {
         &self,
         groups: &[BitSet],
         group_sizes: &[usize],
-    ) -> Vec<(usize, Vec<usize>)> {
-        let mut counts = vec![vec![0; self.mask.bits()]; self.mask.bits() + 1];
+        num_tiles: usize,
+    ) -> Vec<(usize, Vec<u64>)> {
+        let mut counts = vec![vec![0; num_tiles]; num_tiles + 1];
 
         for arrangement in &self.arrangements {
-            let count: usize = self
+            let count: u64 = self
                 .groups
                 .iter_ones()
                 .map(|group| {
                     let group_mines = groups[group].count_overlap_ones(arrangement);
                     let group_size = group_sizes[group];
-                    n_choose_k(group_size, group_mines)
+                    n_choose_k::<u64>(group_size as u64, group_mines as u64)
                 })
                 .product();
 
@@ -71,7 +64,8 @@ impl ArrangementSet {
                 let group_size = group_sizes[group];
 
                 for tile in groups[group].iter_ones() {
-                    counts[total_mines][tile] += count * (group_size - group_mines) / group_size;
+                    counts[total_mines][tile] +=
+                        count * (group_size - group_mines) as u64 / group_size as u64;
                 }
             }
         }
@@ -82,6 +76,12 @@ impl ArrangementSet {
             .filter(|(_, grid)| grid.iter().any(|c| *c > 0))
             .collect()
     }
+}
+
+pub fn natural_ratio_as_float(n: &Natural, d: &Natural) -> f64 {
+    Rational::from_naturals_ref(n, d)
+        .rounding_into(RoundingMode::Nearest)
+        .0
 }
 
 impl MineArrangements {
@@ -99,8 +99,8 @@ impl MineArrangements {
 
                 let constrained_solutions: Natural =
                     counts.iter().map(|x| Natural::from(x.1)).product();
-                let unconstrained_solutions =
-                    n_choose_k_natural(num_unconstrained as u64, unconstrained_mines as u64);
+                let unconstrained_solutions: Natural =
+                    n_choose_k(num_unconstrained as u64, unconstrained_mines as u64);
 
                 constrained_solutions * unconstrained_solutions
             })
@@ -111,12 +111,13 @@ impl MineArrangements {
         let group_sizes = self.groups.iter().map(BitSet::count_ones).collect_vec();
         let num_unconstrained = self.uncontrained_empties().count_ones();
 
-        let subsolution_info: Vec<Vec<(usize, usize, Vec<usize>)>> = self
+        let subsolution_info: Vec<Vec<(usize, u64, Vec<u64>)>> = self
             .sub_arrangements
             .iter()
             .map(|sa| {
                 let counts = sa.count_subsolutions(&self.groups, &group_sizes);
-                let tile_mine_counts = sa.count_tile_safes(&self.groups, &group_sizes);
+                let tile_mine_counts =
+                    sa.count_tile_safes(&self.groups, &group_sizes, self.num_tiles);
 
                 counts
                     .into_iter()
@@ -133,8 +134,8 @@ impl MineArrangements {
             let unconstrained_mines =
                 self.remaining_mines - counts.iter().map(|x| x.0).sum::<usize>();
 
-            let unconstrained_solutions =
-                n_choose_k_natural(num_unconstrained as u64, unconstrained_mines as u64);
+            let unconstrained_solutions: Natural =
+                n_choose_k(num_unconstrained as u64, unconstrained_mines as u64);
             let constrained_solutions: Natural =
                 counts.iter().map(|x| Natural::from(x.1)).product();
 
@@ -146,9 +147,11 @@ impl MineArrangements {
                 }
             }
 
-            unconstrained_count += total_solutions
-                * Natural::from(num_unconstrained - unconstrained_mines)
-                / Natural::from(num_unconstrained);
+            if num_unconstrained > 0 {
+                unconstrained_count += total_solutions
+                    * Natural::from(num_unconstrained - unconstrained_mines)
+                    / Natural::from(num_unconstrained);
+            }
         }
 
         for tile in self.uncontrained_empties().iter_ones() {
@@ -164,11 +167,7 @@ impl MineArrangements {
 
         solutions
             .iter()
-            .map(|sol| {
-                Rational::from_naturals_ref(sol, &total_solutions)
-                    .rounding_into(RoundingMode::Nearest)
-                    .0
-            })
+            .map(|sol| natural_ratio_as_float(sol, &total_solutions))
             .collect()
     }
 }

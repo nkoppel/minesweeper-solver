@@ -111,6 +111,8 @@ impl<G: Graph> Board<G> {
     }
 
     pub fn set_tile(&mut self, tile: usize, hint: u8) {
+        self.clear_tile(tile);
+
         let mut mines = 0;
         let mut empties = 0;
 
@@ -164,6 +166,7 @@ impl<G: Graph> Board<G> {
                         *empties += 1;
                     }
                 }
+                self.grid[tile] = Empty;
             }
             Mine { .. } => {
                 for n in self.graph.neighbors(tile) {
@@ -177,10 +180,10 @@ impl<G: Graph> Board<G> {
                         *empties += 1;
                     }
                 }
+                self.grid[tile] = Empty;
             }
             Empty => {}
         }
-        self.grid[tile] = Empty;
     }
 
     pub fn flag_tile(&mut self, tile: usize) {

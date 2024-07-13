@@ -3,8 +3,8 @@ use itertools::Itertools;
 use crate::{bitset::BitSet, board::*, game::*};
 
 mod combinations_iter;
-mod incremental;
-mod solution_counting;
+// mod incremental;
+pub mod solution_counting;
 
 use combinations_iter::CombinationsIter;
 
@@ -26,7 +26,7 @@ pub struct MineArrangements {
 
 impl ArrangementSet {
     fn new(groups: &[BitSet], group_set: &BitSet, num: usize) -> Self {
-        let mut mask = BitSet::empty(groups[0].bits());
+        let mut mask = BitSet::empty(group_set.bits());
 
         for group in group_set.iter_ones().map(|g| &groups[g]) {
             mask += group;
@@ -44,14 +44,10 @@ impl<G: Graph> Board<G> {
     /// Assigns a group id to each empty cell so that empty cells with the same id are constrained
     /// by the same set of hints.
     fn cell_groups(&self) -> Vec<Option<usize>> {
-        let mut mapping: Vec<usize> = Vec::with_capacity(self.grid.len());
-        let mut is_mapped: Vec<bool> = Vec::with_capacity(self.grid.len());
+        let mut mapping: Vec<(usize, usize)> = vec![(0, 0); self.grid.len()];
         let mut group_ids: Vec<usize> = vec![0; self.grid.len()];
 
         let mut max_group = 1;
-
-        mapping.push(0);
-        is_mapped.push(false);
 
         for i in self
             .grid
@@ -65,25 +61,13 @@ impl<G: Graph> Board<G> {
 
                 let id = group_ids[j];
 
-                if !is_mapped[id] {
-                    mapping[id] = max_group;
-                    is_mapped[id] = true;
+                if mapping[id].1 < i {
+                    mapping[id] = (max_group, i);
+                    group_ids[j] = max_group;
                     max_group += 1;
-
-                    mapping.push(0);
-                    is_mapped.push(false);
+                } else {
+                    group_ids[j] = mapping[id].0;
                 }
-            }
-
-            for j in self.neighbors(i) {
-                if self.grid[j] != Empty {
-                    continue;
-                }
-
-                let id = group_ids[j];
-
-                group_ids[j] = mapping[id];
-                is_mapped[id] = false;
             }
         }
 
@@ -96,13 +80,12 @@ impl<G: Graph> Board<G> {
                 continue;
             }
 
-            if !is_mapped[id] {
-                mapping[id] = max_group;
-                is_mapped[id] = true;
+            if mapping[id].1 != usize::MAX {
+                mapping[id] = (max_group, usize::MAX);
                 max_group += 1;
             }
 
-            out[i] = Some(mapping[id]);
+            out[i] = Some(mapping[id].0);
         }
 
         out
@@ -138,36 +121,41 @@ impl<G: Graph> Board<G> {
         out
     }
 
-    #[inline(always)]
-    fn new_arrangement_set(
-        &self,
-        loc: usize,
-        groups: &[BitSet],
-        cell_groups: &[Option<usize>],
-    ) -> Option<ArrangementSet> {
-        let Hint {
-            remaining_mines: mines @ 1..,
-            ..
-        } = self.grid[loc]
-        else {
-            return None;
-        };
-
-        let group_set = BitSet::from_iter(
-            self.neighbors(loc).filter_map(|j| cell_groups[j]),
-            self.num_tiles(),
-        );
-
-        Some(ArrangementSet::new(groups, &group_set, mines as usize))
-    }
-
     fn initial_solutionset(&self) -> MineArrangements {
         let cell_groups = self.cell_groups();
-        let groups = bitset_groups(&cell_groups);
+        let mut groups = Vec::with_capacity(64);
 
-        let sub_solutions: Vec<ArrangementSet> = (0..self.grid.len())
-            .filter_map(|i| self.new_arrangement_set(i, &groups, &cell_groups))
-            .collect();
+        for (i, group) in cell_groups.iter().enumerate() {
+            let Some(group) = group else { continue };
+
+            if *group >= groups.len() {
+                groups.resize_with(group + 1, || BitSet::empty(self.num_tiles()));
+            }
+
+            groups[*group].set_to_one(i);
+        }
+
+        let mut sub_solutions: Vec<ArrangementSet> = Vec::new();
+
+        for (i, tile) in self.grid.iter().enumerate() {
+            if let Hint {
+                remaining_mines,
+                empties: _empties @ 1..,
+                ..
+            } = tile
+            {
+                let group_set = BitSet::from_iter(
+                    self.neighbors(i).filter_map(|j| cell_groups[j]),
+                    self.num_tiles(),
+                );
+
+                sub_solutions.push(ArrangementSet::new(
+                    &groups,
+                    &group_set,
+                    *remaining_mines as usize,
+                ));
+            }
+        }
 
         MineArrangements {
             groups,
@@ -197,12 +185,14 @@ impl ArrangementSet {
 
     #[must_use]
     fn try_merge_equal_value(&mut self, other: &mut Self, overlap: &mut BitSet) -> Option<()> {
-        let overlap_arrangement = self
-            .arrangements
+        let overlap_arrangement = self.arrangements.first()? & &*overlap;
+
+        if !self.arrangements[1..]
             .iter()
-            .map(|arr| arr & &*overlap)
-            .all_equal_value()
-            .ok()?;
+            .all(|arr| arr.equal_on_mask(&overlap_arrangement, overlap))
+        {
+            return None;
+        }
 
         other
             .arrangements
@@ -316,13 +306,13 @@ impl MineArrangements {
                 .skip(i + 1)
                 .map(|(j, sol)| {
                     (
-                        sol.mask.count_overlap_ones(&self.sub_arrangements[i].mask),
                         j,
+                        sol.mask.count_overlap_ones(&self.sub_arrangements[i].mask),
                     )
                 })
-                .max_by_key(|(a, _)| *a);
+                .max_by_key(|(_, a)| *a);
 
-            if let Some((1.., pos)) = pos {
+            if let Some((pos, 1..)) = pos {
                 let tmp = self.sub_arrangements.swap_remove(pos);
 
                 if let Err(tmp) = self.sub_arrangements[i].try_merge(tmp) {
