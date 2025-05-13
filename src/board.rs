@@ -110,7 +110,8 @@ impl<G: Graph> Board<G> {
         Self::new(game.graph().clone(), game.num_mines())
     }
 
-    pub fn set_tile(&mut self, tile: usize, hint: u8) {
+    #[must_use]
+    pub fn set_tile(&mut self, tile: usize, hint: u8) -> Option<()> {
         self.clear_tile(tile);
 
         let mut mines = 0;
@@ -127,11 +128,17 @@ impl<G: Graph> Board<G> {
             }
         }
 
+        if mines > hint || empties < hint - mines {
+            return None;
+        }
+
         self.grid[tile] = Hint {
             hint,
             remaining_mines: hint - mines,
             empties,
         };
+
+        Some(())
     }
 
     /// Assert that a tile is a hint without making any calls to Game::explore_tile to discover

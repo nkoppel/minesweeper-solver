@@ -62,6 +62,15 @@ fn next_combination(
 
 impl<'a> CombinationsIter<'a> {
     pub fn new(groups: &'a [BitSet], group_set: &'a BitSet, num: usize) -> Self {
+        let num_tiles: usize = group_set.iter_ones().map(|group| groups[group].count_ones()).sum();
+        if num > num_tiles {
+            return Self {
+                groups,
+                group_set,
+                next: None,
+            };
+        }
+
         let mut next = BitSet::empty(group_set.bits());
         fill_front(groups, group_set, &mut next, num);
 

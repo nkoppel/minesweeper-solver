@@ -68,7 +68,8 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
         self.board.assert_tile(tile)
     }
 
-    pub fn set_tile(&mut self, tile: usize, hint: u8) {
+    #[must_use]
+    pub fn set_tile(&mut self, tile: usize, hint: u8) -> Option<()> {
         self.board.set_tile(tile, hint)
     }
 
@@ -90,7 +91,7 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
             return Some(());
         }
 
-        self.board.set_tile(tile, self.game.explore_tile(tile)?);
+        self.board.set_tile(tile, self.game.explore_tile(tile)?)?;
 
         Some(())
     }

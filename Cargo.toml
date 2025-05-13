@@ -9,8 +9,7 @@ edition = "2021"
 
 [dependencies]
 
-getrandom = { version = "0.2", features = ["js"] }
-rand = "0.8"
-smallvec = { version = "1.10", features = ["union"] }
-itertools = "0.13"
-malachite = "0.4"
+rand = "0.9"
+smallvec = { version = "1.15", features = ["union"] }
+itertools = "0.14"
+malachite = { version = "0.6", features = ["random"] }

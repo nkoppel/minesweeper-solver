@@ -1,4 +1,4 @@
-use rand::prelude::*;
+use rand::{prelude::*, rng};
 
 mod game2d;
 mod precomputed_graph;
@@ -45,7 +45,7 @@ pub(crate) fn n_unique_random(
 
     let mut vec: Vec<usize> = (0..max).collect();
 
-    (0..n).map(move |_| vec.swap_remove(rng.gen_range(0..vec.len())))
+    (0..n).map(move |_| vec.swap_remove(rng.random_range(0..vec.len())))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,7 +122,7 @@ impl<G: Graph> InternalGame<G> {
             allowed.swap_remove(*s);
         }
 
-        let (mines, _) = allowed.partial_shuffle(&mut thread_rng(), self.num_mines);
+        let (mines, _) = allowed.partial_shuffle(&mut rng(), self.num_mines);
 
         BitSet::from_iter(mines.iter().copied(), self.num_tiles())
     }

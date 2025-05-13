@@ -1,9 +1,10 @@
 use super::*;
 
 use malachite::{
-    num::{arithmetic::traits::Factorial, conversion::traits::RoundingInto},
-    rounding_modes::RoundingMode,
-    Natural, Rational,
+    base::num::{arithmetic::traits::Factorial, conversion::traits::RoundingInto},
+    base::rounding_modes::RoundingMode,
+    rational::Rational,
+    Natural,
 };
 
 fn n_choose_k<T>(n: u64, k: u64) -> T
@@ -85,26 +86,38 @@ pub fn natural_ratio_as_float(n: &Natural, d: &Natural) -> f64 {
 }
 
 impl MineArrangements {
-    pub fn total_solutions(&self) -> Natural {
+    fn solution_counts(&self) -> Vec<(Natural, Vec<(usize, u64)>)> {
         let group_sizes = self.groups.iter().map(BitSet::count_ones).collect_vec();
         let num_unconstrained = self.uncontrained_empties().count_ones();
 
         self.sub_arrangements
             .iter()
             .map(|sa| sa.count_subsolutions(&self.groups, &group_sizes))
+            .collect_vec()
+            .iter()
+            .map(|i| i.iter().copied())
             .multi_cartesian_product()
-            .map(|counts| {
-                let unconstrained_mines =
-                    self.remaining_mines - counts.iter().map(|x| x.0).sum::<usize>();
+            .filter_map(move |counts| {
+                let unconstrained_mines = self
+                    .remaining_mines
+                    .checked_sub(counts.iter().map(|x| x.0).sum::<usize>())?;
+
+                    if unconstrained_mines > num_unconstrained {
+                        return None;
+                    }
 
                 let constrained_solutions: Natural =
                     counts.iter().map(|x| Natural::from(x.1)).product();
                 let unconstrained_solutions: Natural =
                     n_choose_k(num_unconstrained as u64, unconstrained_mines as u64);
 
-                constrained_solutions * unconstrained_solutions
+                Some((constrained_solutions * unconstrained_solutions, counts))
             })
-            .sum()
+            .collect()
+    }
+
+    pub fn total_solutions(&self) -> Natural {
+        self.solution_counts().into_iter().map(|(num, _)| num).sum()
     }
 
     pub fn tile_safe_solutions(&self) -> Vec<Natural> {
@@ -131,8 +144,16 @@ impl MineArrangements {
         let mut unconstrained_count = Natural::from(0u32);
 
         for counts in subsolution_info.iter().multi_cartesian_product() {
-            let unconstrained_mines =
-                self.remaining_mines - counts.iter().map(|x| x.0).sum::<usize>();
+            let Some(unconstrained_mines) = self
+                .remaining_mines
+                .checked_sub(counts.iter().map(|x| x.0).sum::<usize>())
+            else {
+                continue;
+            };
+
+            if unconstrained_mines > num_unconstrained {
+                continue;
+            }
 
             let unconstrained_solutions: Natural =
                 n_choose_k(num_unconstrained as u64, unconstrained_mines as u64);
@@ -143,7 +164,9 @@ impl MineArrangements {
 
             for (_, solutions, counts) in counts {
                 for (c1, c2) in out.iter_mut().zip(counts) {
-                    *c1 += &total_solutions * Natural::from(*c2) / Natural::from(*solutions);
+                    if *c2 > 0 {
+                        *c1 += &total_solutions * Natural::from(*c2) / Natural::from(*solutions);
+                    }
                 }
             }
 

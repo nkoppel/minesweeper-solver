@@ -94,6 +94,10 @@ impl BitSet {
             .all()
     }
 
+    pub fn clear(&mut self) {
+        self.bits.fill_with(|| u64x8::splat(0))
+    }
+
     pub fn set_to_one(&mut self, idx: usize) {
         assert!(idx < self.bits());
 

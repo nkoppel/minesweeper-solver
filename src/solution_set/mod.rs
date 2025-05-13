@@ -62,6 +62,9 @@ impl<G: Graph> Board<G> {
                 let id = group_ids[j];
 
                 if mapping[id].1 < i {
+                    if id >= mapping.len() {
+                        mapping.resize(id + 1, (0, 0));
+                    }
                     mapping[id] = (max_group, i);
                     group_ids[j] = max_group;
                     max_group += 1;
@@ -78,6 +81,10 @@ impl<G: Graph> Board<G> {
         for (i, id) in group_ids.iter().copied().enumerate() {
             if self.grid[i] != Empty || id == 0 {
                 continue;
+            }
+
+            if id >= mapping.len() {
+                mapping.resize(id + 1, (0, 0));
             }
 
             if mapping[id].1 != usize::MAX {
@@ -175,12 +182,13 @@ impl<G: Graph> Board<G> {
 }
 
 impl ArrangementSet {
-    fn remove_mask(&mut self, mask: &BitSet) {
+    fn remove(&mut self, other: &Self) {
         for arrangement in &mut self.arrangements {
-            *arrangement -= mask;
+            *arrangement -= &other.mask;
         }
 
-        self.mask -= mask;
+        self.groups -= &other.groups;
+        self.mask -= &other.mask;
     }
 
     #[must_use]
@@ -197,7 +205,7 @@ impl ArrangementSet {
         other
             .arrangements
             .retain(|arrangement| overlap_arrangement.equal_on_mask(arrangement, overlap));
-        other.remove_mask(overlap);
+        other.remove(self);
 
         if self.arrangements.len() <= 1 || other.arrangements.len() <= 1 {
             *overlap = BitSet::empty(self.mask.bits());
@@ -363,7 +371,10 @@ impl MineArrangements {
 
         self.sub_arrangements
             .iter()
-            .map(|arr| arr.summarize().iter_ones().collect_vec())
+            .map(ArrangementSet::summarize)
+            .collect_vec()
+            .iter()
+            .map(BitSet::iter_ones)
             .multi_cartesian_product()
             .for_each(|vec| {
                 if !valid_range.contains(&vec.iter().sum::<usize>()) {
