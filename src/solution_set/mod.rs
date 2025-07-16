@@ -4,18 +4,19 @@ use crate::{bitset::BitSet, board::*, game::*};
 
 mod combinations_iter;
 // mod incremental;
+mod sampling;
 pub mod solution_counting;
 
 use combinations_iter::CombinationsIter;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ArrangementSet {
     mask: BitSet,
     groups: BitSet,
     arrangements: Vec<BitSet>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MineArrangements {
     groups: Vec<BitSet>,
     sub_arrangements: Vec<ArrangementSet>,
@@ -61,11 +62,12 @@ impl<G: Graph> Board<G> {
 
                 let id = group_ids[j];
 
-                if mapping[id].1 < i {
-                    if id >= mapping.len() {
-                        mapping.resize(id + 1, (0, 0));
-                    }
-                    mapping[id] = (max_group, i);
+                if id >= mapping.len() {
+                    mapping.resize(id + 1, (0, 0));
+                }
+
+                if mapping[id].1 < i + 1 {
+                    mapping[id] = (max_group, i + 1);
                     group_ids[j] = max_group;
                     max_group += 1;
                 } else {
@@ -121,6 +123,18 @@ impl<G: Graph> Board<G> {
 
         for (i, tile) in self.grid.iter().enumerate() {
             if *tile == Empty {
+                out.set_to_one(i);
+            }
+        }
+
+        out
+    }
+
+    pub fn known_mines(&self) -> BitSet {
+        let mut out = BitSet::empty(self.num_tiles());
+
+        for (i, tile) in self.grid.iter().enumerate() {
+            if matches!(tile, Mine { .. }) {
                 out.set_to_one(i);
             }
         }

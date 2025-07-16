@@ -1,3 +1,5 @@
+use std::hash::Hash;
+
 use rand::{prelude::*, rng};
 
 mod game2d;
@@ -8,7 +10,7 @@ pub use precomputed_graph::*;
 
 use crate::bitset::BitSet;
 
-pub trait Graph: Clone + PartialEq + Eq {
+pub trait Graph: Clone + PartialEq + Eq + Hash {
     fn neighbors(&self, pos: usize) -> impl Iterator<Item = usize> + '_;
 
     fn num_tiles(&self) -> usize;
@@ -23,7 +25,7 @@ pub trait Game {
     fn num_mines(&self) -> usize;
 }
 
-impl<G: Game + Clone + Eq> Graph for G {
+impl<G: Game + Clone + Eq + Hash> Graph for G {
     fn neighbors(&self, pos: usize) -> impl Iterator<Item = usize> + '_ {
         self.graph().neighbors(pos)
     }
@@ -48,14 +50,14 @@ pub(crate) fn n_unique_random(
     (0..n).map(move |_| vec.swap_remove(rng.random_range(0..vec.len())))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StartType {
     Unsafe,
     Safe,
     SafeNeighborhood,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct InternalGame<G: Graph> {
     pub grid: Option<BitSet>,
     start_type: StartType,

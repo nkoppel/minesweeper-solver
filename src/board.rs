@@ -236,4 +236,35 @@ impl<G: Graph> Board<G> {
     pub fn subset_of(&self, other: &Self) -> bool {
         self.num_mines == other.num_mines && is_grid_subset_of(&self.grid, &other.grid)
     }
+
+    pub fn normalize(&self) -> Self {
+        let grid = self
+            .grid
+            .iter()
+            .map(|tile| match *tile {
+                Mine { needs_propogate } => AssertHint { needs_propogate },
+                Hint {
+                    remaining_mines: 0, ..
+                } => AssertHint {
+                    needs_propogate: false,
+                },
+                Hint {
+                    remaining_mines,
+                    empties,
+                    ..
+                } => Hint {
+                    hint: remaining_mines,
+                    remaining_mines,
+                    empties,
+                },
+                tile => tile,
+            })
+            .collect();
+
+        Self {
+            grid,
+            graph: self.graph.clone(),
+            num_mines: self.remaining_mines(),
+        }
+    }
 }

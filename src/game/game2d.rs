@@ -27,7 +27,7 @@ pub const KNIGHT_NEIGHBORHOOD: [(isize, isize); 8] =
                (-1,  2),   ( 1,  2),
     ];
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Graph2d {
     width: usize,
     height: usize,

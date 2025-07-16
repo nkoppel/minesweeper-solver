@@ -3,7 +3,7 @@ use smallvec::SmallVec;
 use super::*;
 use std::rc::Rc;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PrecomputedGraph {
     neighbors: Rc<[SmallVec<[usize; 8]>]>,
 }

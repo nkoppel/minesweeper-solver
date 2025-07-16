@@ -14,20 +14,28 @@ where
     T::factorial(n) / (T::factorial(k) * T::factorial(n - k))
 }
 
+pub(super) fn get_arrangement_count(
+    arrangement: &BitSet,
+    group_ids: &BitSet,
+    groups: &[BitSet],
+    group_sizes: &[usize],
+) -> u64 {
+    group_ids
+        .iter_ones()
+        .map(|group| {
+            let group_mines = groups[group].count_overlap_ones(arrangement);
+            let group_size = group_sizes[group];
+            n_choose_k::<u64>(group_size as u64, group_mines as u64)
+        })
+        .product()
+}
+
 impl ArrangementSet {
     fn count_subsolutions(&self, groups: &[BitSet], group_sizes: &[usize]) -> Vec<(usize, u64)> {
         let mut counts = vec![0; self.mask.count_ones() + 1];
 
         for arrangement in &self.arrangements {
-            let count: u64 = self
-                .groups
-                .iter_ones()
-                .map(|group| {
-                    let group_mines = groups[group].count_overlap_ones(arrangement);
-                    let group_size = group_sizes[group];
-                    n_choose_k::<u64>(group_size as u64, group_mines as u64)
-                })
-                .product();
+            let count: u64 = get_arrangement_count(arrangement, &self.groups, groups, group_sizes);
 
             counts[arrangement.count_ones()] += count;
         }
@@ -45,37 +53,32 @@ impl ArrangementSet {
         group_sizes: &[usize],
         num_tiles: usize,
     ) -> Vec<(usize, Vec<u64>)> {
-        let mut counts = vec![vec![0; num_tiles]; num_tiles + 1];
+        let mut counts: Vec<(usize, Vec<u64>)> = Vec::new();
 
         for arrangement in &self.arrangements {
-            let count: u64 = self
-                .groups
-                .iter_ones()
-                .map(|group| {
-                    let group_mines = groups[group].count_overlap_ones(arrangement);
-                    let group_size = group_sizes[group];
-                    n_choose_k::<u64>(group_size as u64, group_mines as u64)
-                })
-                .product();
-
+            let count = get_arrangement_count(arrangement, &self.groups, groups, group_sizes);
             let total_mines = arrangement.count_ones();
+
+            while total_mines >= counts.len() {
+                counts.push((counts.len(), Vec::new()));
+            }
+            if counts[total_mines].1.is_empty() {
+                counts[total_mines].1.resize(num_tiles, 0);
+            }
 
             for group in self.groups.iter_ones() {
                 let group_mines = groups[group].count_overlap_ones(arrangement);
                 let group_size = group_sizes[group];
 
                 for tile in groups[group].iter_ones() {
-                    counts[total_mines][tile] +=
+                    counts[total_mines].1[tile] +=
                         count * (group_size - group_mines) as u64 / group_size as u64;
                 }
             }
         }
 
+        counts.retain(|c| !c.1.is_empty());
         counts
-            .into_iter()
-            .enumerate()
-            .filter(|(_, grid)| grid.iter().any(|c| *c > 0))
-            .collect()
     }
 }
 
@@ -86,7 +89,7 @@ pub fn natural_ratio_as_float(n: &Natural, d: &Natural) -> f64 {
 }
 
 impl MineArrangements {
-    fn solution_counts(&self) -> Vec<(Natural, Vec<(usize, u64)>)> {
+    pub(super) fn solution_counts(&self) -> Vec<(Natural, Vec<(usize, u64)>)> {
         let group_sizes = self.groups.iter().map(BitSet::count_ones).collect_vec();
         let num_unconstrained = self.uncontrained_empties().count_ones();
 
@@ -102,9 +105,9 @@ impl MineArrangements {
                     .remaining_mines
                     .checked_sub(counts.iter().map(|x| x.0).sum::<usize>())?;
 
-                    if unconstrained_mines > num_unconstrained {
-                        return None;
-                    }
+                if unconstrained_mines > num_unconstrained {
+                    return None;
+                }
 
                 let constrained_solutions: Natural =
                     counts.iter().map(|x| Natural::from(x.1)).product();

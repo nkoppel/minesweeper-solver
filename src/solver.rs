@@ -25,6 +25,13 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Game for Solver<Gr, Ga> {
     }
 }
 
+impl<Gr: Graph> Solver<Gr, InternalGame<Gr>> {
+    pub fn from_board(board: Board<Gr>, start_type: StartType) -> Self {
+        let game = InternalGame::new(board.num_mines, start_type, board.graph.clone());
+        Self { board, game }
+    }
+}
+
 impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
     pub fn new(board: Board<Gr>, game: Ga) -> Self {
         assert!(board.graph == *game.graph());
@@ -160,17 +167,17 @@ impl<Gr: Graph, Ga: Game<Graph = Gr>> Solver<Gr, Ga> {
 
             let (safe, mines) = self.board.solutionset().solved();
 
+            for tile in mines.iter_ones() {
+                self.flag_tile(tile);
+                tiles.push(tile);
+            }
+
             if !safe.any() {
                 break;
             }
 
             for tile in safe.iter_ones() {
                 self.uncover_tile(tile)?;
-                tiles.push(tile);
-            }
-
-            for tile in mines.iter_ones() {
-                self.flag_tile(tile);
                 tiles.push(tile);
             }
         }
