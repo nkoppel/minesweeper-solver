@@ -1,18 +1,51 @@
 use super::*;
 
 use malachite::{
-    base::num::{arithmetic::traits::Factorial, conversion::traits::RoundingInto},
-    base::rounding_modes::RoundingMode,
+    base::{
+        num::{basic::traits::One, conversion::traits::RoundingInto},
+        rounding_modes::RoundingMode,
+    },
     rational::Rational,
     Natural,
 };
 
-fn n_choose_k<T>(n: u64, k: u64) -> T
-where
-    T: Factorial + std::ops::Mul<Output = T> + std::ops::Div<Output = T>,
-{
-    T::factorial(n) / (T::factorial(k) * T::factorial(n - k))
+static mut FACTORIALS_U64: Vec<u64> = Vec::new();
+static mut FACTORIALS_NATURAL: Vec<Natural> = Vec::new();
+
+#[allow(static_mut_refs)]
+fn n_choose_k_u64(n: usize, k: usize) -> u64 {
+    // SAFETY: This is a single-threaded program, and this is the only user of the
+    // FACTORIALS_U64 vec.
+    unsafe {
+        while FACTORIALS_U64.len() <= n {
+            let next = FACTORIALS_U64
+                .last()
+                .map(|x| x * FACTORIALS_U64.len() as u64)
+                .unwrap_or(1);
+            FACTORIALS_U64.push(next);
+        }
+
+        FACTORIALS_U64[n] / (FACTORIALS_U64[k] * FACTORIALS_U64[n - k])
+    }
 }
+
+#[allow(static_mut_refs)]
+fn n_choose_k(n: usize, k: usize) -> Natural {
+    // SAFETY: This is a single-threaded program, and this is the only user of the
+    // FACTORIALS_NATURAL vec.
+    unsafe {
+        while FACTORIALS_NATURAL.len() <= n {
+            let next = FACTORIALS_NATURAL
+                .last()
+                .map(|x| x * Natural::from(FACTORIALS_NATURAL.len()))
+                .unwrap_or(Natural::ONE);
+            FACTORIALS_NATURAL.push(next);
+        }
+
+        &FACTORIALS_NATURAL[n] / (FACTORIALS_NATURAL[k].clone() * &FACTORIALS_NATURAL[n - k])
+    }
+}
+
 
 pub(super) fn get_arrangement_count(
     arrangement: &BitSet,
@@ -25,7 +58,7 @@ pub(super) fn get_arrangement_count(
         .map(|group| {
             let group_mines = groups[group].count_overlap_ones(arrangement);
             let group_size = group_sizes[group];
-            n_choose_k::<u64>(group_size as u64, group_mines as u64)
+            n_choose_k_u64(group_size, group_mines)
         })
         .product()
 }
@@ -112,7 +145,7 @@ impl MineArrangements {
                 let constrained_solutions: Natural =
                     counts.iter().map(|x| Natural::from(x.1)).product();
                 let unconstrained_solutions: Natural =
-                    n_choose_k(num_unconstrained as u64, unconstrained_mines as u64);
+                    n_choose_k(num_unconstrained, unconstrained_mines);
 
                 Some((constrained_solutions * unconstrained_solutions, counts))
             })
@@ -159,7 +192,7 @@ impl MineArrangements {
             }
 
             let unconstrained_solutions: Natural =
-                n_choose_k(num_unconstrained as u64, unconstrained_mines as u64);
+                n_choose_k(num_unconstrained, unconstrained_mines);
             let constrained_solutions: Natural =
                 counts.iter().map(|x| Natural::from(x.1)).product();
 

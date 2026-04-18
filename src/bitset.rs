@@ -1,7 +1,7 @@
 use smallvec::{smallvec, SmallVec};
 use std::iter::FusedIterator;
 use std::ops::*;
-use std::simd::{cmp::SimdPartialEq, mask64x8, num::SimdUint, u64x8};
+use std::simd::{num::SimdUint, u64x8};
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BitSet {
@@ -89,9 +89,7 @@ impl BitSet {
             .iter()
             .zip(&other.bits)
             .zip(&mask.bits)
-            .map(|((a, b), m)| (a & m).simd_eq(b & m))
-            .fold(mask64x8::splat(true), |fold, val| fold & val)
-            .all()
+            .all(|((a, b), m)| a & m == b & m)
     }
 
     pub fn clear(&mut self) {
@@ -140,9 +138,7 @@ impl BitSet {
     }
 
     pub fn first_n_ones(&self, num_ones: usize) -> Self {
-        let mut out = Self::empty(self.bits());
-        out.extend(self.iter_ones().take(num_ones));
-        out
+        Self::from_iter(self.iter_ones().take(num_ones), self.bits())
     }
 }
 
