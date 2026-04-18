@@ -59,7 +59,7 @@ fn main() {
     // print_probs_2d(&solution_set.tile_safe_probability(), width);
 
     let mut tree = Tree::new(board.clone());
-    for _ in 0..30000 {
+    for _ in 0..50000 {
         tree.step();
     }
     board.assert_tile(tree.best_move());

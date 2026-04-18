@@ -43,8 +43,8 @@ impl ArrangementSet {
 
 impl<G: Graph> Board<G> {
     /// Assigns a group id to each empty cell so that empty cells with the same id are constrained
-    /// by the same set of hints.
-    fn cell_groups(&self) -> Vec<Option<usize>> {
+    /// by the same set of hints. 0 indicates nonempty cell.
+    fn cell_groups(&self) -> Vec<usize> {
         let mut mapping: Vec<(usize, usize)> = vec![(0, 0); self.grid.len()];
         let mut group_ids: Vec<usize> = vec![0; self.grid.len()];
 
@@ -76,104 +76,24 @@ impl<G: Graph> Board<G> {
             }
         }
 
-        max_group = 0;
+        max_group = 1;
 
-        let mut out = vec![None; self.grid.len()];
-
-        for (i, id) in group_ids.iter().copied().enumerate() {
-            if self.grid[i] != Empty || id == 0 {
+        for (i, id) in group_ids.iter_mut().enumerate() {
+            if *id == 0 || self.grid[i] != Empty {
                 continue;
             }
 
-            if id >= mapping.len() {
-                mapping.resize(id + 1, (0, 0));
-            }
-
-            if mapping[id].1 != usize::MAX {
-                mapping[id] = (max_group, usize::MAX);
+            if mapping[*id].1 != usize::MAX {
+                mapping[*id] = (max_group, usize::MAX);
                 max_group += 1;
             }
 
-            out[i] = Some(mapping[id].0);
+            *id = mapping[*id].0;
         }
 
-        out
-    }
-
-    /// Assigns a group id to each empty cell so that empty cells with the same id are constrained
-    /// by the same set of hints.
-    fn bitset_groups(&self) -> Vec<Option<usize>> {
-        let mut mapping: Vec<(usize, usize)> = vec![(0, 0); self.grid.len()];
-        let mut group_ids: Vec<usize> = vec![0; self.grid.len()];
-
-        let mut max_group = 1;
-
-        for i in self
-            .grid
-            .iter()
-            .positions(|c| matches!(c, Hint { empties: 1.., .. }))
-        {
-            for j in self.neighbors(i) {
-                if self.grid[j] != Empty {
-                    continue;
-                }
-
-                let id = group_ids[j];
-
-                if id >= mapping.len() {
-                    mapping.resize(id + 1, (0, 0));
-                }
-
-                if mapping[id].1 < i + 1 {
-                    mapping[id] = (max_group, i + 1);
-                    group_ids[j] = max_group;
-                    max_group += 1;
-                } else {
-                    group_ids[j] = mapping[id].0;
-                }
-            }
-        }
-
-        max_group = 0;
-
-        let mut out = vec![None; self.grid.len()];
-
-        for (i, id) in group_ids.iter().copied().enumerate() {
-            if self.grid[i] != Empty || id == 0 {
-                continue;
-            }
-
-            if id >= mapping.len() {
-                mapping.resize(id + 1, (0, 0));
-            }
-
-            if mapping[id].1 != usize::MAX {
-                mapping[id] = (max_group, usize::MAX);
-                max_group += 1;
-            }
-
-            out[i] = Some(mapping[id].0);
-        }
-
-        out
+        group_ids
     }
 }
-
-// fn bitset_groups(cell_groups: &[Option<usize>]) -> Vec<BitSet> {
-// let mut groups = Vec::with_capacity(64);
-
-// for (i, group) in cell_groups.iter().enumerate() {
-// let Some(group) = group else { continue };
-
-// if *group >= groups.len() {
-// groups.resize_with(group + 1, || BitSet::empty(cell_groups.len()));
-// }
-
-// groups[*group].set_to_one(i);
-// }
-
-// groups
-// }
 
 impl<G: Graph> Board<G> {
     pub fn all_empties(&self) -> BitSet {
@@ -205,13 +125,15 @@ impl<G: Graph> Board<G> {
         let mut groups = Vec::with_capacity(64);
 
         for (i, group) in cell_groups.iter().enumerate() {
-            let Some(group) = group else { continue };
+            if *group == 0 {
+                continue;
+            }
 
-            if *group >= groups.len() {
+            if *group > groups.len() {
                 groups.resize_with(group + 1, || BitSet::empty(self.num_tiles()));
             }
 
-            groups[*group].set_to_one(i);
+            groups[*group - 1].set_to_one(i);
         }
 
         let mut sub_solutions: Vec<ArrangementSet> = Vec::new();
@@ -224,7 +146,7 @@ impl<G: Graph> Board<G> {
             } = tile
             {
                 let group_set = BitSet::from_iter(
-                    self.neighbors(i).filter_map(|j| cell_groups[j]),
+                    self.neighbors(i).filter(|j| cell_groups[*j] > 0).map(|j| cell_groups[j] - 1),
                     self.num_tiles(),
                 );
 
