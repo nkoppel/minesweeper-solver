@@ -39,11 +39,114 @@ impl ArrangementSet {
             arrangements: CombinationsIter::new(groups, group_set, num).collect(),
         }
     }
+
+    // Basically, try_merge with an arrangementset defined by a single hint, without actually
+    // constructing that arrangementset
+    #[allow(clippy::result_large_err)]
+    fn add(&mut self, groups: &[BitSet], group_set: &BitSet, num: usize) -> Result<(), Self> {
+        let overlap_group_set = self.groups.clone() & group_set;
+        let new_group_set = group_set.clone() - &self.groups;
+
+        let mut overlap_mask = BitSet::empty(group_set.bits());
+        let mut new_mask = BitSet::empty(group_set.bits());
+
+        for group in overlap_group_set.iter_ones().map(|g| &groups[g]) {
+            overlap_mask += group;
+        }
+
+        for group in new_group_set.iter_ones().map(|g| &groups[g]) {
+            new_mask += group;
+        }
+
+        let max_overlap_mines = num;
+        let min_overlap_mines = num.saturating_sub(new_mask.count_ones());
+
+        self.arrangements.retain(|arr| {
+            let overlap_mines = arr.count_overlap_ones(&overlap_mask);
+            (min_overlap_mines..=max_overlap_mines).contains(&overlap_mines)
+        });
+
+        if self.arrangements.is_empty() {
+            self.mask += new_mask;
+            self.groups += new_group_set;
+            return Ok(());
+        }
+
+        let overlap_arrangement = &self.arrangements[0] & &overlap_mask;
+
+        if self.arrangements[1..]
+            .iter()
+            .all(|arr| arr.equal_on_mask(&overlap_arrangement, &overlap_mask))
+        {
+            let mut new_arrangements = Vec::with_capacity(16);
+
+            new_arrangements.extend(CombinationsIter::new(
+                groups,
+                &new_group_set,
+                num - overlap_arrangement.count_ones(),
+            ));
+
+            if self.arrangements.len() == 1 && new_arrangements.len() != 1 {
+                std::mem::swap(&mut self.arrangements, &mut new_arrangements);
+            }
+
+            if new_arrangements.len() != 1 {
+                return Err(Self {
+                    mask: new_mask,
+                    groups: new_group_set,
+                    arrangements: new_arrangements,
+                });
+            }
+
+            let new_arrangement = new_arrangements.pop().unwrap();
+
+            for arr in &mut self.arrangements {
+                *arr += &new_arrangement;
+            }
+
+            self.mask += new_mask;
+            self.groups += new_group_set;
+
+            return Ok(());
+        }
+
+        let mut new_arrangements: Vec<BitSet> = Vec::with_capacity(self.arrangements.len());
+        let mut prev_combinations: Vec<(usize, usize, usize)> = Vec::with_capacity(8);
+
+        for arr in &self.arrangements {
+            let new_mines = num - arr.count_overlap_ones(&overlap_mask);
+
+            if let Some((_, start, end)) = prev_combinations
+                .iter()
+                .find(|(num, _, _)| *num == new_mines)
+            {
+                for i in *start..*end {
+                    new_arrangements.push(arr | (new_arrangements[i].clone() & &new_mask));
+                }
+            } else {
+                let start = new_arrangements.len();
+
+                for arr2 in CombinationsIter::new(groups, &new_group_set, new_mines) {
+                    new_arrangements.push(arr | arr2);
+                }
+
+                let end = new_arrangements.len();
+                prev_combinations.push((new_mines, start, end));
+            }
+        }
+
+        self.arrangements = new_arrangements;
+
+        self.mask += new_mask;
+        self.groups += new_group_set;
+
+        Ok(())
+    }
 }
 
 impl<G: Graph> Board<G> {
     /// Assigns a group id to each empty cell so that empty cells with the same id are constrained
-    /// by the same set of hints. 0 indicates nonempty cell.
+    /// by the same set of hints. 0 indicates nonempty or unconstrained cell.
     fn cell_groups(&self) -> Vec<usize> {
         let mut mapping: Vec<(usize, usize)> = vec![(0, 0); self.grid.len()];
         let mut group_ids: Vec<usize> = vec![0; self.grid.len()];
@@ -146,7 +249,9 @@ impl<G: Graph> Board<G> {
             } = tile
             {
                 let group_set = BitSet::from_iter(
-                    self.neighbors(i).filter(|j| cell_groups[*j] > 0).map(|j| cell_groups[j] - 1),
+                    self.neighbors(i)
+                        .filter(|j| cell_groups[*j] > 0)
+                        .map(|j| cell_groups[j] - 1),
                     self.num_tiles(),
                 );
 
@@ -167,8 +272,90 @@ impl<G: Graph> Board<G> {
         }
     }
 
+    fn merged_solutionset(&self) -> MineArrangements {
+        let cell_groups = self.cell_groups();
+        let mut groups = Vec::with_capacity(64);
+
+        for (i, group) in cell_groups.iter().enumerate() {
+            if *group == 0 {
+                continue;
+            }
+
+            if *group > groups.len() {
+                groups.resize_with(group + 1, || BitSet::empty(self.num_tiles()));
+            }
+
+            groups[*group - 1].set_to_one(i);
+        }
+
+        let mut constraints: Vec<(BitSet, BitSet, usize)> = Vec::new();
+
+        for (i, tile) in self.grid.iter().enumerate() {
+            if let Hint {
+                remaining_mines,
+                empties: _empties @ 1..,
+                ..
+            } = tile
+            {
+                let group_set = BitSet::from_iter(
+                    self.neighbors(i)
+                        .filter(|j| cell_groups[*j] > 0)
+                        .map(|j| cell_groups[j] - 1),
+                    self.num_tiles(),
+                );
+
+                let mask = BitSet::from_iter(
+                    self.neighbors(i).filter(|j| cell_groups[*j] > 0),
+                    self.num_tiles(),
+                );
+
+                constraints.push((mask, group_set, *remaining_mines as usize));
+            }
+        }
+
+        let mut sub_arrangements: Vec<ArrangementSet> = Vec::new();
+        let mut i = 0;
+
+        if let Some(cons) = constraints.pop() {
+            sub_arrangements.push(ArrangementSet::new(&groups, &cons.1, cons.2));
+        }
+
+        while i < sub_arrangements.len() {
+            let Some((pos, count)) = constraints
+                .iter()
+                .enumerate()
+                .map(|(j, cons)| (j, cons.0.count_overlap_ones(&sub_arrangements[i].mask)))
+                .max_by_key(|(_, a)| *a)
+            else {
+                break;
+            };
+
+            if count == 0 && i < sub_arrangements.len() - 1 {
+                i += 1;
+                continue;
+            }
+
+            let (_mask, group_set, num) = constraints.swap_remove(pos);
+
+            if let Err(sub_sol) = sub_arrangements[i].add(&groups, &group_set, num) {
+                sub_arrangements.push(sub_sol);
+            }
+        }
+
+        assert!(constraints.is_empty());
+
+        MineArrangements {
+            groups,
+            sub_arrangements,
+            mask: self.all_empties(),
+            remaining_mines: self.remaining_mines(),
+            num_tiles: self.num_tiles(),
+        }
+    }
+
     pub fn solutionset(&self) -> MineArrangements {
-        let mut out = self.initial_solutionset();
+        // let mut out = self.initial_solutionset();
+        let mut out = self.merged_solutionset();
         out.merge_all_subsolutions();
         out.filter_summaries();
         out
@@ -202,7 +389,7 @@ impl ArrangementSet {
         other.remove(self);
 
         if self.arrangements.len() <= 1 || other.arrangements.len() <= 1 {
-            *overlap = BitSet::empty(self.mask.bits());
+            overlap.clear();
             return None;
         }
 

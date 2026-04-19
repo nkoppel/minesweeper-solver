@@ -69,11 +69,11 @@ impl BitSet {
         Self { bits }
     }
 
-    fn combine_assign(&mut self, other: &Self, f: impl Fn(&mut u64x8, u64x8)) {
+    fn combine_assign(&mut self, other: &Self, f: impl Fn(u64x8, u64x8) -> u64x8) {
         assert_eq!(self.vecs(), other.vecs());
 
         for (a, b) in self.bits.iter_mut().zip(&other.bits) {
-            f(a, *b)
+            *a = f(*a, *b)
         }
     }
 
@@ -175,8 +175,9 @@ macro_rules! impl_combination_operator {
         impl $op for BitSet {
             type Output = BitSet;
 
-            fn $fn(self, rhs: BitSet) -> BitSet {
-                self.combine(&rhs, $func)
+            fn $fn(mut self, rhs: BitSet) -> BitSet {
+                self.combine_assign(&rhs, $func);
+                self
             }
         }
 
@@ -191,16 +192,18 @@ macro_rules! impl_combination_operator {
         impl $op<&BitSet> for BitSet {
             type Output = BitSet;
 
-            fn $fn(self, rhs: &BitSet) -> BitSet {
-                self.combine(rhs, $func)
+            fn $fn(mut self, rhs: &BitSet) -> BitSet {
+                self.combine_assign(rhs, $func);
+                self
             }
         }
 
         impl $op<BitSet> for &BitSet {
             type Output = BitSet;
 
-            fn $fn(self, rhs: BitSet) -> BitSet {
-                self.combine(&rhs, $func)
+            fn $fn(self, mut rhs: BitSet) -> BitSet {
+                rhs.combine_assign(self, |a, b| $func(b, a));
+                rhs
             }
         }
     };
@@ -226,13 +229,13 @@ impl_combination_operator!(BitAnd, bitand, |a, b| a & b);
 impl_combination_operator!(BitOr, bitor, |a, b| a | b);
 impl_combination_operator!(BitXor, bitxor, |a, b| a ^ b);
 impl_combination_operator!(Add, add, |a, b| a | b);
-impl_combination_operator!(Sub, sub, |a, b| a & !b);
+impl_combination_operator!(Sub, sub, |a, b: u64x8| a & !b);
 
-impl_assignment_operator!(BitAndAssign, bitand_assign, |a, b| *a &= b);
-impl_assignment_operator!(BitOrAssign, bitor_assign, |a, b| *a |= b);
-impl_assignment_operator!(BitXorAssign, bitxor_assign, |a, b| *a ^= b);
-impl_assignment_operator!(AddAssign, add_assign, |a, b| *a |= b);
-impl_assignment_operator!(SubAssign, sub_assign, |a, b| *a &= !b);
+impl_assignment_operator!(BitAndAssign, bitand_assign, |a, b| a & b);
+impl_assignment_operator!(BitOrAssign, bitor_assign, |a, b| a | b);
+impl_assignment_operator!(BitXorAssign, bitxor_assign, |a, b| a ^ b);
+impl_assignment_operator!(AddAssign, add_assign, |a, b| a | b);
+impl_assignment_operator!(SubAssign, sub_assign, |a, b| a & !b);
 
 impl Extend<usize> for BitSet {
     fn extend<T: IntoIterator<Item = usize>>(&mut self, iter: T) {

@@ -46,7 +46,6 @@ fn n_choose_k(n: usize, k: usize) -> Natural {
     }
 }
 
-
 pub(super) fn get_arrangement_count(
     arrangement: &BitSet,
     group_ids: &BitSet,
