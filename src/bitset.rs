@@ -42,6 +42,12 @@ impl BitSet {
             .flat_map(|(i, &x)| IterOnes(x).map(move |j| i * 64 + j))
     }
 
+    pub fn to_ones_vec(&self) -> Vec<usize> {
+        let mut out = Vec::with_capacity(self.count_ones());
+        out.extend(self.iter_ones());
+        out
+    }
+
     pub fn first_one(&self) -> Option<usize> {
         self.iter_ones().next()
     }

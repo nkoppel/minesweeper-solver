@@ -33,7 +33,7 @@ fn select_weighted_random_natural<'a>(
 }
 
 fn random_combination(mask: &BitSet, n: usize) -> BitSet {
-    let mut indices: SmallVec<[usize; 16]> = mask.iter_ones().collect();
+    let mut indices = mask.to_ones_vec();
     let (shuffled, _) = indices.partial_shuffle(&mut rng(), n);
     BitSet::from_iter(shuffled.iter().copied(), mask.bits())
 }
